@@ -1,0 +1,281 @@
+/* ---- Design tokens ---- */
+:root {
+	--lc-space-2: 8px;
+	--lc-space-3: 12px;
+	--lc-space-4: 16px;
+	--lc-radius-md: 6px;
+	--lc-radius-lg: 10px;
+	--lc-radius-xl: 12px;
+	--lc-shadow-sm: 0 1px 6px rgba(0, 0, 0, 0.08);
+}
+
+body.theme-dark {
+	--lc-shadow-sm: 0 1px 6px rgba(0, 0, 0, 0.35);
+}
+
+/* Break out of Obsidian's Readable Line Length column, same reasoning as
+   the habit tracker plugin. */
+.markdown-preview-sizer:has(.lc-wheel-root),
+.markdown-source-view.mod-cm6 .cm-sizer:has(.lc-wheel-root),
+.markdown-preview-sizer:has(.lc-outcomes-root),
+.markdown-source-view.mod-cm6 .cm-sizer:has(.lc-outcomes-root) {
+	max-width: none !important;
+}
+
+/* ---- Wheel of Life ---- */
+
+.lc-wheel-root {
+	margin: 1em calc(-1 * var(--file-margins, 0px));
+	padding: 0 12px;
+}
+
+.lc-wheel-chart {
+	display: block;
+	width: 100%;
+	max-width: 420px;
+	margin: 0 auto var(--lc-space-4);
+}
+
+.lc-wheel-grid-ring {
+	fill: none;
+	stroke: var(--background-modifier-border);
+	stroke-width: 1;
+}
+
+.lc-wheel-axis {
+	stroke: var(--background-modifier-border);
+	stroke-width: 1;
+}
+
+.lc-wheel-axis-label {
+	font-size: 11px;
+	fill: var(--text-muted);
+}
+
+.lc-wheel-data-poly {
+	fill: color-mix(in srgb, var(--interactive-accent) 22%, transparent);
+	stroke: var(--interactive-accent);
+	stroke-width: 2;
+}
+
+.lc-wheel-data-dot {
+	fill: var(--lc-cat-color, var(--interactive-accent));
+	stroke: var(--background-primary);
+	stroke-width: 1.5;
+}
+
+.lc-wheel-list {
+	display: flex;
+	flex-direction: column;
+	gap: var(--lc-space-3);
+}
+
+.lc-wheel-row {
+	padding: var(--lc-space-3);
+	border: 1px solid var(--background-modifier-border);
+	border-left: 4px solid var(--lc-cat-color, var(--interactive-accent));
+	border-radius: var(--lc-radius-lg);
+	background-color: var(--background-primary-alt, var(--background-secondary));
+}
+
+.lc-wheel-row-label {
+	font-weight: 600;
+	margin-bottom: 6px;
+}
+
+.lc-wheel-rating-buttons {
+	display: flex;
+	flex-wrap: wrap;
+	gap: 4px;
+	margin-bottom: 8px;
+}
+
+.lc-rating-btn {
+	width: 26px;
+	height: 26px;
+	padding: 0;
+	border: 1px solid var(--background-modifier-border);
+	border-radius: var(--lc-radius-md);
+	background-color: var(--background-secondary);
+	color: var(--text-muted);
+	cursor: pointer;
+	font-size: 0.75em;
+	box-shadow: none;
+	transition: background-color 0.1s ease, color 0.1s ease, border-color 0.1s ease;
+}
+
+.lc-rating-btn:hover {
+	border-color: var(--lc-cat-color, var(--interactive-accent));
+}
+
+.lc-rating-btn-filled {
+	background-color: var(--lc-cat-color, var(--interactive-accent));
+	border-color: transparent;
+	color: #ffffff;
+	font-weight: 700;
+}
+
+.lc-wheel-row-prose {
+	font-size: 0.85em;
+	color: var(--text-muted);
+	line-height: 1.4;
+}
+
+.lc-wheel-row-prose-empty {
+	font-style: italic;
+}
+
+/* ---- Outcome cards ---- */
+
+.lc-outcomes-root {
+	margin: 1em calc(-1 * var(--file-margins, 0px));
+	padding: 0 12px;
+}
+
+.lc-outcomes-empty {
+	color: var(--text-muted);
+	font-style: italic;
+	text-align: center;
+	padding: 1.5em 0;
+}
+
+.lc-outcomes-grid {
+	display: grid;
+	grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));
+	gap: var(--lc-space-3);
+}
+
+.lc-outcome-card {
+	padding: var(--lc-space-3) var(--lc-space-4);
+	border: 1px solid var(--background-modifier-border);
+	border-left: 4px solid var(--lc-outcome-color, var(--interactive-accent));
+	border-radius: var(--lc-radius-xl);
+	background-color: var(--background-primary-alt, var(--background-secondary));
+	cursor: pointer;
+	transition: box-shadow 0.15s ease;
+}
+
+.lc-outcome-card:hover {
+	box-shadow: var(--lc-shadow-sm);
+}
+
+.lc-outcome-header {
+	display: flex;
+	align-items: center;
+	justify-content: space-between;
+	gap: 8px;
+	margin-bottom: 6px;
+}
+
+.lc-outcome-title {
+	font-weight: 700;
+	font-size: 1.05em;
+}
+
+.lc-outcome-status {
+	font-size: 0.65em;
+	font-weight: 700;
+	letter-spacing: 0.04em;
+	text-transform: uppercase;
+	padding: 2px 6px;
+	border-radius: var(--lc-radius-md);
+	background-color: var(--background-secondary);
+	color: var(--text-muted);
+	flex-shrink: 0;
+}
+
+.lc-outcome-status-active {
+	background-color: color-mix(in srgb, var(--interactive-accent) 20%, var(--background-secondary));
+	color: var(--interactive-accent);
+}
+
+.lc-outcome-status-done {
+	background-color: color-mix(in srgb, #22c55e 25%, var(--background-secondary));
+	color: #16803c;
+}
+
+.lc-outcome-status-missed {
+	background-color: color-mix(in srgb, var(--text-error, red) 20%, var(--background-secondary));
+	color: var(--text-error, red);
+}
+
+.lc-outcome-category {
+	font-size: 0.72em;
+	text-transform: uppercase;
+	letter-spacing: 0.03em;
+	color: var(--text-faint);
+	margin-bottom: 6px;
+}
+
+.lc-outcome-metric {
+	font-size: 0.88em;
+	margin-bottom: 4px;
+}
+
+.lc-outcome-deadline {
+	font-size: 0.8em;
+	color: var(--text-muted);
+	margin-bottom: 8px;
+}
+
+.lc-outcome-system {
+	margin-top: 6px;
+	padding-top: 8px;
+	border-top: 1px solid var(--background-modifier-border);
+}
+
+.lc-outcome-system-label {
+	font-size: 0.7em;
+	font-weight: 700;
+	text-transform: uppercase;
+	letter-spacing: 0.03em;
+	color: var(--text-faint);
+	margin-bottom: 4px;
+}
+
+.lc-outcome-habit-row {
+	display: flex;
+	align-items: center;
+	gap: 6px;
+	font-size: 0.82em;
+	padding: 2px 0;
+}
+
+.lc-outcome-habit-dot {
+	width: 8px;
+	height: 8px;
+	border-radius: 50%;
+	flex-shrink: 0;
+}
+
+.lc-outcome-habit-name {
+	flex-grow: 1;
+	overflow: hidden;
+	text-overflow: ellipsis;
+	white-space: nowrap;
+}
+
+.lc-outcome-habit-streak {
+	color: var(--text-muted);
+	flex-shrink: 0;
+}
+
+.lc-outcome-system-empty {
+	margin-top: 6px;
+	padding-top: 8px;
+	border-top: 1px solid var(--background-modifier-border);
+	font-size: 0.78em;
+	color: var(--text-faint);
+	font-style: italic;
+}
+
+@media (max-width: 480px) {
+	.lc-outcomes-grid {
+		grid-template-columns: 1fr;
+	}
+
+	.lc-rating-btn {
+		width: 30px;
+		height: 30px;
+	}
+}
