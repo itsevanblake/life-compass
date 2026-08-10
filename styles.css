@@ -178,9 +178,16 @@ body.theme-dark {
 	background-color: var(--background-primary-alt, var(--background-secondary));
 }
 
+.lc-wheel-row-label-row {
+	display: flex;
+	align-items: center;
+	justify-content: space-between;
+	gap: 8px;
+	margin-bottom: 6px;
+}
+
 .lc-wheel-row-label {
 	font-weight: 600;
-	margin-bottom: 6px;
 }
 
 .lc-wheel-rating-buttons {

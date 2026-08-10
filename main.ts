@@ -19,7 +19,10 @@ interface WheelCategory {
 	label: string;
 }
 
-const WHEEL_CATEGORIES: WheelCategory[] = [
+// Seed set — new vaults (and the old markdown migration) start with these,
+// but the user can add/remove life areas from here on; the live list lives
+// in PluginData.categories, not this constant.
+const DEFAULT_WHEEL_CATEGORIES: WheelCategory[] = [
 	{ key: "career-business", label: "Career / Business" },
 	{ key: "money", label: "Money" },
 	{ key: "health", label: "Health" },
@@ -29,14 +32,24 @@ const WHEEL_CATEGORIES: WheelCategory[] = [
 	{ key: "contribution", label: "Contribution" },
 ];
 
-const CATEGORY_COLORS = ["#22c55e", "#3b82f6", "#ef4444", "#f97316", "#a855f7", "#eab308", "#ec4899"];
-function categoryColor(key: string): string {
-	const i = WHEEL_CATEGORIES.findIndex((c) => c.key === key);
-	return CATEGORY_COLORS[i % CATEGORY_COLORS.length];
+const CATEGORY_COLORS = ["#22c55e", "#3b82f6", "#ef4444", "#f97316", "#a855f7", "#eab308", "#ec4899", "#14b8a6", "#f43f5e", "#84cc16"];
+function categoryColor(categories: WheelCategory[], key: string): string {
+	const i = categories.findIndex((c) => c.key === key);
+	return CATEGORY_COLORS[Math.max(0, i) % CATEGORY_COLORS.length];
 }
-function categoryKeyForLabel(label: string | undefined): string {
-	const found = WHEEL_CATEGORIES.find((c) => c.label === label);
-	return found ? found.key : WHEEL_CATEGORIES[0].key;
+function categoryKeyForLabel(categories: WheelCategory[], label: string | undefined): string {
+	const found = categories.find((c) => c.label === label);
+	return found ? found.key : categories[0].key;
+}
+function uniqueCategoryKey(categories: WheelCategory[], label: string): string {
+	const base = slugify(label);
+	let key = base;
+	let n = 2;
+	while (categories.some((c) => c.key === key)) {
+		key = `${base}-${n}`;
+		n++;
+	}
+	return key;
 }
 
 // ---- Data model — Life Compass owns all of this itself now (no Goals/*.md
@@ -52,7 +65,7 @@ type GoalStatus = "active" | "done" | "missed";
 interface Outcome {
 	id: string;
 	name: string;
-	visionCategory: string; // WHEEL_CATEGORIES key
+	visionCategory: string; // key into PluginData.categories
 	deadline: string; // YYYY-MM-DD
 	status: GoalStatus;
 	successMetric: string;
@@ -103,12 +116,13 @@ interface Quarter {
 
 interface PluginData {
 	vision: Record<string, VisionCategoryData>;
+	categories: WheelCategory[]; // the Wheel of Life's life areas — user-editable, seeded from DEFAULT_WHEEL_CATEGORIES
 	outcomes: Outcome[];
 	quarters: Quarter[];
 	currentQuarterId: string | null;
 }
 
-const DEFAULT_DATA: PluginData = { vision: {}, outcomes: [], quarters: [], currentQuarterId: null };
+const DEFAULT_DATA: PluginData = { vision: {}, categories: [...DEFAULT_WHEEL_CATEGORIES], outcomes: [], quarters: [], currentQuarterId: null };
 
 interface PluginSettings {
 	supabaseUrl: string;
@@ -313,7 +327,7 @@ async function importFromGoalsNotes(app: App, existingVision: Record<string, Vis
 	const visionFile = app.vault.getAbstractFileByPath("Goals/Vision.md");
 	if (visionFile instanceof TFile) {
 		const content = await app.vault.read(visionFile);
-		for (const cat of WHEEL_CATEGORIES) {
+		for (const cat of DEFAULT_WHEEL_CATEGORIES) {
 			const body = extractSection(content, cat.label.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"));
 			vision[cat.key] = {
 				rating: existingVision[cat.key]?.rating ?? 0,
@@ -336,13 +350,13 @@ async function importFromGoalsNotes(app: App, existingVision: Record<string, Vis
 		const obstacles = extractSection(content, "Obstacles");
 		const id = uid(slugify(file.basename));
 		outcomeNameToId.set(file.basename, id);
-		if (fm["Vision Category"] && !WHEEL_CATEGORIES.some((c) => c.label === fm["Vision Category"])) {
-			warnings.push(`"${file.basename}": Vision Category "${fm["Vision Category"]}" didn't match a known category — defaulted to "${WHEEL_CATEGORIES[0].label}", check it.`);
+		if (fm["Vision Category"] && !DEFAULT_WHEEL_CATEGORIES.some((c) => c.label === fm["Vision Category"])) {
+			warnings.push(`"${file.basename}": Vision Category "${fm["Vision Category"]}" didn't match a known category — defaulted to "${DEFAULT_WHEEL_CATEGORIES[0].label}", check it.`);
 		}
 		outcomes.push({
 			id,
 			name: file.basename,
-			visionCategory: categoryKeyForLabel(fm["Vision Category"]),
+			visionCategory: categoryKeyForLabel(DEFAULT_WHEEL_CATEGORIES, fm["Vision Category"]),
 			deadline: fm.Deadline ?? "",
 			status: (fm.Status as GoalStatus) ?? "active",
 			successMetric: fm["Success Metric"] ?? "",
@@ -693,7 +707,7 @@ class LifeCompassView extends ItemView {
 	renderOverview(body: HTMLElement) {
 		body.addClass("lc-overview-root");
 
-		const ratings = WHEEL_CATEGORIES.map((c) => this.plugin.data.vision[c.key]?.rating ?? 0).filter((r) => r > 0);
+		const ratings = this.plugin.data.categories.map((c) => this.plugin.data.vision[c.key]?.rating ?? 0).filter((r) => r > 0);
 		const avgRating = ratings.length ? (ratings.reduce((a, b) => a + b, 0) / ratings.length).toFixed(1) : "—";
 		const visionCard = body.createDiv({ cls: "lc-overview-card" });
 		visionCard.createDiv({ text: "🎯 Vision", cls: "lc-field-label" });
@@ -744,10 +758,24 @@ class LifeCompassView extends ItemView {
 		redrawChart();
 
 		const list = body.createDiv({ cls: "lc-wheel-list" });
-		for (const cat of WHEEL_CATEGORIES) {
+		for (const cat of this.plugin.data.categories) {
 			const row = list.createDiv({ cls: "lc-wheel-row" });
-			row.style.setProperty("--lc-cat-color", categoryColor(cat.key));
-			row.createDiv({ text: cat.label, cls: "lc-wheel-row-label" });
+			row.style.setProperty("--lc-cat-color", categoryColor(this.plugin.data.categories, cat.key));
+			const labelRow = row.createDiv({ cls: "lc-wheel-row-label-row" });
+			labelRow.createDiv({ text: cat.label, cls: "lc-wheel-row-label" });
+			if (this.plugin.data.categories.length > 1) {
+				const removeBtn = labelRow.createEl("button", { text: "×", cls: "lc-milestone-remove" });
+				removeBtn.type = "button";
+				removeBtn.setAttr("aria-label", `Remove ${cat.label}`);
+				removeBtn.onclick = () => {
+					new ConfirmDeleteModal(this.plugin.app, cat.label, async () => {
+						this.plugin.data.categories = this.plugin.data.categories.filter((c) => c.key !== cat.key);
+						delete this.plugin.data.vision[cat.key];
+						await this.plugin.persist();
+						this.render();
+					}).open();
+				};
+			}
 
 			const ratingRow = row.createDiv({ cls: "lc-wheel-rating-buttons" });
 			const current = this.plugin.data.vision[cat.key]?.rating ?? 0;
@@ -777,13 +805,37 @@ class LifeCompassView extends ItemView {
 				await this.plugin.persist();
 			};
 		}
+
+		const addRow = body.createDiv({ cls: "lc-milestone-add-group" });
+		const addInput = addRow.createEl("input", { cls: "lc-inline-input" });
+		addInput.placeholder = "New life area, e.g. Spirituality";
+		addInput.setAttr("aria-label", "New life area name");
+		const addBtn = addRow.createEl("button", { text: "+ Add Life Area" });
+		addBtn.type = "button";
+		const submit = async () => {
+			const label = addInput.value.trim();
+			if (!label) return;
+			const key = uniqueCategoryKey(this.plugin.data.categories, label);
+			this.plugin.data.categories.push({ key, label });
+			this.plugin.data.vision[key] = { rating: 0, prose: "" };
+			await this.plugin.persist();
+			this.render();
+		};
+		addBtn.onclick = submit;
+		addInput.onkeydown = (e) => {
+			if (e.key === "Enter") {
+				e.preventDefault();
+				submit();
+			}
+		};
 	}
 
 	buildChart(): SVGSVGElement {
 		const size = 320;
 		const center = size / 2;
 		const maxRadius = size / 2 - 48;
-		const n = WHEEL_CATEGORIES.length;
+		const categories = this.plugin.data.categories;
+		const n = categories.length;
 		const svgNs = "http://www.w3.org/2000/svg";
 		const svg = document.createElementNS(svgNs, "svg") as unknown as SVGSVGElement;
 		// Extra horizontal room so axis labels like "Personal Growth" don't clip against the viewBox edge.
@@ -799,14 +851,14 @@ class LifeCompassView extends ItemView {
 
 		for (let ring = 2; ring <= 10; ring += 2) {
 			const r = (ring / 10) * maxRadius;
-			const points = WHEEL_CATEGORIES.map((_, i) => pointAt(i, r).join(",")).join(" ");
+			const points = categories.map((_, i) => pointAt(i, r).join(",")).join(" ");
 			const poly = document.createElementNS(svgNs, "polygon");
 			poly.setAttribute("points", points);
 			poly.addClass("lc-wheel-grid-ring");
 			svg.appendChild(poly);
 		}
 
-		WHEEL_CATEGORIES.forEach((cat, i) => {
+		categories.forEach((cat, i) => {
 			const [x, y] = pointAt(i, maxRadius);
 			const line = document.createElementNS(svgNs, "line");
 			line.setAttribute("x1", "" + center);
@@ -827,14 +879,14 @@ class LifeCompassView extends ItemView {
 			svg.appendChild(label);
 		});
 
-		const dataPoints = WHEEL_CATEGORIES.map((cat, i) => pointAt(i, ((this.plugin.data.vision[cat.key]?.rating ?? 0) / 10) * maxRadius).join(","))
+		const dataPoints = categories.map((cat, i) => pointAt(i, ((this.plugin.data.vision[cat.key]?.rating ?? 0) / 10) * maxRadius).join(","))
 			.join(" ");
 		const dataPoly = document.createElementNS(svgNs, "polygon");
 		dataPoly.setAttribute("points", dataPoints);
 		dataPoly.addClass("lc-wheel-data-poly");
 		svg.appendChild(dataPoly);
 
-		WHEEL_CATEGORIES.forEach((cat, i) => {
+		categories.forEach((cat, i) => {
 			const value = this.plugin.data.vision[cat.key]?.rating ?? 0;
 			if (!value) return;
 			const [x, y] = pointAt(i, (value / 10) * maxRadius);
@@ -843,7 +895,7 @@ class LifeCompassView extends ItemView {
 			dot.setAttribute("cy", "" + y);
 			dot.setAttribute("r", "4");
 			dot.addClass("lc-wheel-data-dot");
-			dot.style.setProperty("--lc-cat-color", categoryColor(cat.key));
+			dot.style.setProperty("--lc-cat-color", categoryColor(categories, cat.key));
 			svg.appendChild(dot);
 
 			const [lx, ly] = pointAt(i, (value / 10) * maxRadius + 14);
@@ -853,7 +905,7 @@ class LifeCompassView extends ItemView {
 			valueLabel.setAttribute("text-anchor", "middle");
 			valueLabel.setAttribute("dominant-baseline", "middle");
 			valueLabel.addClass("lc-wheel-data-value");
-			valueLabel.style.setProperty("--lc-cat-color", categoryColor(cat.key));
+			valueLabel.style.setProperty("--lc-cat-color", categoryColor(categories, cat.key));
 			valueLabel.textContent = "" + value;
 			svg.appendChild(valueLabel);
 		});
@@ -878,13 +930,13 @@ class LifeCompassView extends ItemView {
 		const grid = body.createDiv({ cls: "lc-outcomes-grid" });
 		for (const outcome of this.plugin.data.outcomes) {
 			const card = grid.createDiv({ cls: "lc-outcome-card" });
-			card.style.setProperty("--lc-outcome-color", categoryColor(outcome.visionCategory));
+			card.style.setProperty("--lc-outcome-color", categoryColor(this.plugin.data.categories, outcome.visionCategory));
 
 			const header = card.createDiv({ cls: "lc-outcome-header" });
 			header.createDiv({ text: outcome.name, cls: "lc-outcome-title" });
 			header.createSpan({ text: outcome.status, cls: "lc-outcome-status lc-outcome-status-" + outcome.status });
 
-			const catLabel = WHEEL_CATEGORIES.find((c) => c.key === outcome.visionCategory)?.label;
+			const catLabel = this.plugin.data.categories.find((c) => c.key === outcome.visionCategory)?.label;
 			if (catLabel) card.createDiv({ text: catLabel, cls: "lc-outcome-category" });
 			if (outcome.successMetric) card.createDiv({ text: outcome.successMetric, cls: "lc-outcome-metric" });
 			if (outcome.deadline) card.createDiv({ text: daysUntil(outcome.deadline), cls: "lc-outcome-deadline" });
@@ -1267,7 +1319,7 @@ class OutcomeFormModal extends Modal {
 			  }
 			: {
 					name: "",
-					visionCategory: WHEEL_CATEGORIES[0].key,
+					visionCategory: plugin.data.categories[0]?.key ?? "",
 					deadline: "",
 					status: "active",
 					successMetric: "",
@@ -1284,7 +1336,7 @@ class OutcomeFormModal extends Modal {
 
 		new Setting(contentEl).setName("Name").addText((t) => t.setValue(this.values.name).onChange((v) => (this.values.name = v)));
 		new Setting(contentEl).setName("Vision Category").addDropdown((dd) => {
-			WHEEL_CATEGORIES.forEach((c) => dd.addOption(c.key, c.label));
+			this.plugin.data.categories.forEach((c) => dd.addOption(c.key, c.label));
 			dd.setValue(this.values.visionCategory).onChange((v) => (this.values.visionCategory = v));
 		});
 		new Setting(contentEl).setName("Deadline").addText((t) => {
@@ -1631,6 +1683,11 @@ function mergeData(local: PluginData, remote: PluginData): PluginData {
 		vision[k] = { ...(remote.vision?.[k] ?? { rating: 0, prose: "" }), ...(local.vision?.[k] ?? {}) };
 	}
 
+	const categoriesByKey = new Map<string, WheelCategory>();
+	for (const c of remote.categories ?? []) categoriesByKey.set(c.key, c);
+	for (const c of local.categories ?? []) categoriesByKey.set(c.key, c);
+	const categories = categoriesByKey.size ? Array.from(categoriesByKey.values()) : [...DEFAULT_WHEEL_CATEGORIES];
+
 	const outcomesById = new Map<string, Outcome>();
 	for (const o of remote.outcomes ?? []) outcomesById.set(o.id, o);
 	for (const o of local.outcomes ?? []) outcomesById.set(o.id, o);
@@ -1644,6 +1701,7 @@ function mergeData(local: PluginData, remote: PluginData): PluginData {
 
 	return {
 		vision,
+		categories,
 		outcomes: Array.from(outcomesById.values()),
 		quarters: Array.from(quartersById.values()),
 		currentQuarterId: local.currentQuarterId ?? remote.currentQuarterId ?? null,
@@ -1664,6 +1722,7 @@ export default class LifeCompassPlugin extends Plugin {
 		this.settings = Object.assign({}, DEFAULT_SETTINGS, saved?.settings);
 		this.data = {
 			vision: saved?.vision ?? DEFAULT_DATA.vision,
+			categories: saved?.categories?.length ? saved.categories : [...DEFAULT_WHEEL_CATEGORIES],
 			outcomes: saved?.outcomes ?? DEFAULT_DATA.outcomes,
 			quarters: saved?.quarters ?? DEFAULT_DATA.quarters,
 			currentQuarterId: saved?.currentQuarterId ?? DEFAULT_DATA.currentQuarterId,
@@ -1694,7 +1753,7 @@ export default class LifeCompassPlugin extends Plugin {
 	}
 
 	ensureVisionDefaults() {
-		for (const cat of WHEEL_CATEGORIES) {
+		for (const cat of this.data.categories) {
 			if (!this.data.vision[cat.key]) this.data.vision[cat.key] = { rating: 0, prose: "" };
 		}
 	}
@@ -1718,6 +1777,7 @@ export default class LifeCompassPlugin extends Plugin {
 		}
 		this.data = {
 			vision: imported.vision,
+			categories: this.data.categories,
 			outcomes: imported.outcomes,
 			quarters: imported.quarters,
 			currentQuarterId: imported.currentQuarterId,
@@ -1836,6 +1896,7 @@ export default class LifeCompassPlugin extends Plugin {
 					const incoming = payload.new.data as PluginData;
 					this.data = {
 						vision: incoming.vision ?? {},
+						categories: incoming.categories?.length ? incoming.categories : [...DEFAULT_WHEEL_CATEGORIES],
 						outcomes: incoming.outcomes ?? [],
 						quarters: incoming.quarters ?? [],
 						currentQuarterId: incoming.currentQuarterId ?? null,
@@ -1852,6 +1913,7 @@ export default class LifeCompassPlugin extends Plugin {
 		await this.saveData({
 			settings: this.settings,
 			vision: this.data.vision,
+			categories: this.data.categories,
 			outcomes: this.data.outcomes,
 			quarters: this.data.quarters,
 			currentQuarterId: this.data.currentQuarterId,
