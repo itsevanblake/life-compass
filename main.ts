@@ -60,6 +60,7 @@ interface Outcome {
 	baseline?: string;
 	obstacles?: string;
 	progress: number; // 0-100, manually set
+	linkedHabitIds: string[]; // explicit links to habit-tracker habit IDs, picked in the edit modal
 	createdAt: string;
 	updatedAt: string;
 }
@@ -349,6 +350,7 @@ async function importFromGoalsNotes(app: App, existingVision: Record<string, Vis
 			baseline: isPlaceholder(baseline) ? undefined : baseline,
 			obstacles: isPlaceholder(obstacles) ? undefined : obstacles,
 			progress: 0,
+			linkedHabitIds: [],
 			createdAt: fm.Created ?? todayStr(),
 			updatedAt: fm["Last Updated"] ?? todayStr(),
 		});
@@ -880,7 +882,10 @@ class LifeCompassView extends ItemView {
 
 			const linkedQuarterIds = this.plugin.data.quarters.filter((q) => q.outcomeId === outcome.id).map((q) => q.id.toLowerCase());
 			const matchNames = new Set([outcome.name.toLowerCase(), ...linkedQuarterIds]);
-			const linkedHabits = (habits ?? []).filter((h) => h.linkedGoal && matchNames.has(h.linkedGoal.trim().toLowerCase()));
+			const explicitIds = new Set(outcome.linkedHabitIds ?? []);
+			const linkedHabits = (habits ?? []).filter(
+				(h) => explicitIds.has(h.id) || (h.linkedGoal && matchNames.has(h.linkedGoal.trim().toLowerCase()))
+			);
 
 			if (linkedHabits.length) {
 				const systemEl = card.createDiv({ cls: "lc-outcome-system" });
@@ -1224,12 +1229,16 @@ class OutcomeFormModal extends Modal {
 		baseline: string;
 		progress: number;
 	};
+	// Mutable draft, same pattern as QuarterFormModal's checkinFieldsDraft
+	// — not written to the Outcome until Save is clicked.
+	linkedHabitIdsDraft: string[];
 
 	constructor(plugin: LifeCompassPlugin, existing: Outcome | null, onDone: () => void) {
 		super(plugin.app);
 		this.plugin = plugin;
 		this.existing = existing;
 		this.onDone = onDone;
+		this.linkedHabitIdsDraft = existing ? [...(existing.linkedHabitIds ?? [])] : [];
 		this.values = existing
 			? {
 					name: existing.name,
@@ -1291,6 +1300,39 @@ class OutcomeFormModal extends Modal {
 					.onChange((v) => (this.values.progress = v))
 			);
 
+		contentEl.createEl("div", { text: "Linked habits", cls: "lc-field-label" });
+		const habits = getHabitTrackerHabits(this.plugin.app);
+		if (!habits) {
+			contentEl.createEl("p", {
+				text: "Habit Tracker isn't installed/enabled — install it to link habits here.",
+				cls: "setting-item-description",
+			});
+		} else if (habits.length === 0) {
+			contentEl.createEl("p", { text: "No habits yet in Habit Tracker.", cls: "setting-item-description" });
+		} else {
+			contentEl.createEl("p", {
+				text: "This is the System that actually drives this Outcome — check every habit that serves it.",
+				cls: "setting-item-description",
+			});
+			const list = contentEl.createDiv({ cls: "lc-habit-picker" });
+			for (const h of habits) {
+				const row = list.createEl("label", { cls: "lc-habit-picker-row" });
+				const cb = row.createEl("input");
+				cb.type = "checkbox";
+				cb.checked = this.linkedHabitIdsDraft.includes(h.id);
+				cb.onchange = () => {
+					if (cb.checked) {
+						if (!this.linkedHabitIdsDraft.includes(h.id)) this.linkedHabitIdsDraft.push(h.id);
+					} else {
+						this.linkedHabitIdsDraft = this.linkedHabitIdsDraft.filter((id) => id !== h.id);
+					}
+				};
+				const dot = row.createSpan({ cls: "lc-outcome-habit-dot" });
+				dot.style.backgroundColor = h.color;
+				row.createSpan({ text: h.name });
+			}
+		}
+
 		const footer = contentEl.createDiv({ cls: "lc-modal-footer" });
 		const saveBtn = footer.createEl("button", { text: "Save", cls: "mod-cta" });
 		saveBtn.type = "button";
@@ -1309,6 +1351,7 @@ class OutcomeFormModal extends Modal {
 				this.existing.why = this.values.why;
 				this.existing.baseline = this.values.baseline || undefined;
 				this.existing.progress = this.values.progress;
+				this.existing.linkedHabitIds = this.linkedHabitIdsDraft;
 				this.existing.updatedAt = now;
 			} else {
 				this.plugin.data.outcomes.push({
@@ -1321,6 +1364,7 @@ class OutcomeFormModal extends Modal {
 					why: this.values.why,
 					baseline: this.values.baseline || undefined,
 					progress: this.values.progress,
+					linkedHabitIds: this.linkedHabitIdsDraft,
 					createdAt: now,
 					updatedAt: now,
 				});

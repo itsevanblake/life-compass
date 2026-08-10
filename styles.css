@@ -333,6 +333,31 @@ body.theme-dark {
 	flex-shrink: 0;
 }
 
+.lc-habit-picker {
+	display: flex;
+	flex-direction: column;
+	gap: 2px;
+	margin-bottom: var(--lc-space-md, 12px);
+	max-height: 220px;
+	overflow-y: auto;
+	border: 1px solid var(--background-modifier-border);
+	border-radius: var(--lc-radius-sm, 4px);
+	padding: 6px 10px;
+}
+
+.lc-habit-picker-row {
+	display: flex;
+	align-items: center;
+	gap: 8px;
+	padding: 4px 0;
+	cursor: pointer;
+	font-size: 0.9em;
+}
+
+.lc-habit-picker-row input[type="checkbox"] {
+	margin: 0;
+}
+
 .lc-outcome-habit-name {
 	flex-grow: 1;
 	overflow: hidden;
