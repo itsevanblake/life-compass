@@ -841,6 +841,17 @@ class LifeCompassView extends ItemView {
 			dot.addClass("lc-wheel-data-dot");
 			dot.style.setProperty("--lc-cat-color", categoryColor(cat.key));
 			svg.appendChild(dot);
+
+			const [lx, ly] = pointAt(i, (value / 10) * maxRadius + 14);
+			const valueLabel = document.createElementNS(svgNs, "text");
+			valueLabel.setAttribute("x", "" + lx);
+			valueLabel.setAttribute("y", "" + ly);
+			valueLabel.setAttribute("text-anchor", "middle");
+			valueLabel.setAttribute("dominant-baseline", "middle");
+			valueLabel.addClass("lc-wheel-data-value");
+			valueLabel.style.setProperty("--lc-cat-color", categoryColor(cat.key));
+			valueLabel.textContent = "" + value;
+			svg.appendChild(valueLabel);
 		});
 
 		return svg;
@@ -889,7 +900,7 @@ class LifeCompassView extends ItemView {
 
 			if (linkedHabits.length) {
 				const systemEl = card.createDiv({ cls: "lc-outcome-system" });
-				systemEl.createDiv({ text: "System", cls: "lc-outcome-system-label" });
+				systemEl.createDiv({ text: "Goal Supporting Habits", cls: "lc-outcome-system-label" });
 				for (const h of linkedHabits) {
 					const row = systemEl.createDiv({ cls: "lc-outcome-habit-row" });
 					const dot = row.createSpan({ cls: "lc-outcome-habit-dot" });
