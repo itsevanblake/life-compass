@@ -59,6 +59,7 @@ interface Outcome {
 	why: string;
 	baseline?: string;
 	obstacles?: string;
+	progress: number; // 0-100, manually set
 	createdAt: string;
 	updatedAt: string;
 }
@@ -149,6 +150,76 @@ function daysUntil(dateStr: string | undefined): string {
 	if (days < 0) return `${Math.abs(days)} days overdue`;
 	if (days === 0) return "Due today";
 	return `${days} days left`;
+}
+
+// Shared by both the Quarter tab's Check-ins section and the Daily Note
+// embed — was previously copy-pasted in both places, risking drift.
+function renderCheckinTodayForm(container: HTMLElement, plugin: LifeCompassPlugin, quarter: Quarter, onSaved: () => void) {
+	if (quarter.checkinFields.length === 0) {
+		container.createDiv({ text: "No check-in fields defined yet — add some by editing this quarter.", cls: "lc-outcomes-empty" });
+		return;
+	}
+	const today = todayStr();
+	const todayValues = quarter.checkins[today] ?? {};
+	const form = container.createDiv({ cls: "lc-checkin-form" });
+	const inputs: Record<string, HTMLInputElement> = {};
+	for (const field of quarter.checkinFields) {
+		const row = form.createDiv({ cls: "lc-checkin-field-row" });
+		row.createSpan({ text: field.label, cls: "lc-checkin-field-label" });
+		const input = row.createEl("input", { cls: "lc-inline-input" });
+		input.type = field.type === "number" ? "number" : "text";
+		input.value = todayValues[field.key] !== undefined ? "" + todayValues[field.key] : "";
+		input.setAttr("aria-label", field.label);
+		inputs[field.key] = input;
+	}
+	const saveBtn = form.createEl("button", { text: `Save today (${today})`, cls: "mod-cta" });
+	saveBtn.type = "button";
+	saveBtn.onclick = async () => {
+		const entry: Record<string, string | number> = {};
+		for (const field of quarter.checkinFields) {
+			const raw = inputs[field.key].value;
+			entry[field.key] = field.type === "number" ? Number(raw) || 0 : raw;
+		}
+		quarter.checkins[today] = entry;
+		await plugin.persist();
+		new Notice("Check-in saved.");
+		onSaved();
+	};
+}
+
+// A compact heatmap for the current quarter's first numeric check-in
+// field — one cell per day from the quarter's earliest check-in (or
+// today, whichever is earlier) through today, colored by intensity
+// relative to the highest value logged. Restores the visual the old
+// Tracker-plugin heatmap gave before the markdown-based system was
+// removed.
+function buildCheckinHeatmap(quarter: Quarter): HTMLElement | null {
+	const numericField = quarter.checkinFields.find((f) => f.type === "number");
+	if (!numericField) return null;
+	const dates = Object.keys(quarter.checkins).sort();
+	if (dates.length === 0) return null;
+
+	const maxVal = Math.max(1, ...dates.map((d) => Number(quarter.checkins[d][numericField.key]) || 0));
+	const start = new Date(dates[0]);
+	const end = new Date();
+	const wrap = document.createElement("div");
+	wrap.addClass("lc-heatmap-wrap");
+	wrap.createDiv({ text: `${numericField.label} — daily`, cls: "lc-field-label" });
+	const grid = wrap.createDiv({ cls: "lc-heatmap-grid" });
+
+	for (let d = new Date(start); d <= end; d = new Date(d.getTime() + 86400000)) {
+		const dateStr = formatDate(d);
+		const value = Number(quarter.checkins[dateStr]?.[numericField.key]) || 0;
+		const cell = grid.createDiv({ cls: "lc-heatmap-cell" });
+		cell.setAttr("aria-label", `${dateStr}: ${value}`);
+		cell.title = `${dateStr}: ${value}`;
+		if (value > 0) {
+			const intensity = Math.min(1, value / maxVal);
+			cell.style.opacity = `${0.25 + intensity * 0.75}`;
+			cell.addClass("lc-heatmap-cell-filled");
+		}
+	}
+	return wrap;
 }
 
 // ---- Cross-plugin interop with habit-tracker (unrelated data store, read
@@ -250,6 +321,8 @@ async function importFromGoalsNotes(app: App, existingVision: Record<string, Vis
 		}
 	}
 
+	const warnings: string[] = [];
+
 	// Outcomes
 	const outcomes: Outcome[] = [];
 	const outcomeNameToId = new Map<string, string>();
@@ -262,6 +335,9 @@ async function importFromGoalsNotes(app: App, existingVision: Record<string, Vis
 		const obstacles = extractSection(content, "Obstacles");
 		const id = uid(slugify(file.basename));
 		outcomeNameToId.set(file.basename, id);
+		if (fm["Vision Category"] && !WHEEL_CATEGORIES.some((c) => c.label === fm["Vision Category"])) {
+			warnings.push(`"${file.basename}": Vision Category "${fm["Vision Category"]}" didn't match a known category — defaulted to "${WHEEL_CATEGORIES[0].label}", check it.`);
+		}
 		outcomes.push({
 			id,
 			name: file.basename,
@@ -272,6 +348,7 @@ async function importFromGoalsNotes(app: App, existingVision: Record<string, Vis
 			why: isPlaceholder(why) ? "" : why,
 			baseline: isPlaceholder(baseline) ? undefined : baseline,
 			obstacles: isPlaceholder(obstacles) ? undefined : obstacles,
+			progress: 0,
 			createdAt: fm.Created ?? todayStr(),
 			updatedAt: fm["Last Updated"] ?? todayStr(),
 		});
@@ -290,7 +367,11 @@ async function importFromGoalsNotes(app: App, existingVision: Record<string, Vis
 		const fm = (app.metadataCache.getFileCache(file)?.frontmatter ?? {}) as Record<string, string>;
 		const content = await app.vault.read(file);
 		const outcomeName = wikilinkTarget(fm.Outcome);
-		const outcomeId = (outcomeName && outcomeNameToId.get(outcomeName)) ?? outcomes[0]?.id ?? "";
+		const matchedOutcomeId = outcomeName ? outcomeNameToId.get(outcomeName) : undefined;
+		if (outcomeName && !matchedOutcomeId) {
+			warnings.push(`"${file.basename}": Outcome link "${outcomeName}" didn't match any imported outcome — defaulted to "${outcomes[0]?.name ?? "(none)"}", check it.`);
+		}
+		const outcomeId = matchedOutcomeId ?? outcomes[0]?.id ?? "";
 
 		const priority = extractSection(content, "Priority");
 		const why = extractSection(content, "Why");
@@ -377,9 +458,12 @@ async function importFromGoalsNotes(app: App, existingVision: Record<string, Vis
 	const activeQuarters = quarters.filter((q) => q.status === "active");
 	const currentQuarterId = activeQuarters.length === 1 ? activeQuarters[0].id : quarters[0]?.id ?? null;
 
-	const summary = `Imported ${outcomes.length} outcome${outcomes.length === 1 ? "" : "s"}, ${quarters.length} quarter${
+	let summary = `Imported ${outcomes.length} outcome${outcomes.length === 1 ? "" : "s"}, ${quarters.length} quarter${
 		quarters.length === 1 ? "" : "s"
 	}, ${totalCheckins} check-in day${totalCheckins === 1 ? "" : "s"}.`;
+	if (warnings.length) {
+		summary += `\n\n⚠️ ${warnings.length} thing${warnings.length === 1 ? "" : "s"} to double-check after import:\n` + warnings.map((w) => `• ${w}`).join("\n");
+	}
 
 	return { vision, outcomes, quarters, currentQuarterId, summary };
 }
@@ -398,7 +482,7 @@ class ConfirmMigrationModal extends Modal {
 		const { contentEl } = this;
 		contentEl.addClass("lc-modal");
 		contentEl.createEl("h3", { text: "Import complete" });
-		contentEl.createEl("p", { text: this.summary });
+		contentEl.createEl("p", { text: this.summary, cls: "lc-modal-summary" });
 		contentEl.createEl("p", {
 			text: "Life Compass now owns this data (synced via Supabase). Move the old Goals/ notes to trash? This uses your system/Obsidian trash, not permanent deletion.",
 			cls: "setting-item-description",
@@ -521,6 +605,17 @@ class LifeCompassSettingTab extends PluginSettingTab {
 				await this.plugin.runMigration();
 			})
 		);
+
+		containerEl.createEl("h3", { text: "Backup" });
+		containerEl.createEl("p", {
+			text: "Now that Vision/Outcomes/Quarters aren't stored as notes, the only durable copy besides Supabase is this device's local plugin data. Export a snapshot into the vault (backed up the same way the rest of your notes are) as a safety net.",
+			cls: "setting-item-description",
+		});
+		new Setting(containerEl).addButton((btn) =>
+			btn.setButtonText("Export data as JSON…").onClick(async () => {
+				await this.plugin.exportData();
+			})
+		);
 	}
 
 	updateStatus() {
@@ -534,11 +629,11 @@ class LifeCompassSettingTab extends PluginSettingTab {
 // ---- The main view ----
 
 const VIEW_TYPE = "life-compass-view";
-type Tab = "vision" | "outcomes" | "quarter";
+type Tab = "overview" | "vision" | "outcomes" | "quarter";
 
 class LifeCompassView extends ItemView {
 	plugin: LifeCompassPlugin;
-	activeTab: Tab = "vision";
+	activeTab: Tab = "overview";
 
 	constructor(leaf: WorkspaceLeaf, plugin: LifeCompassPlugin) {
 		super(leaf);
@@ -566,6 +661,7 @@ class LifeCompassView extends ItemView {
 
 		const tabRow = root.createDiv({ cls: "lc-tab-row" });
 		const tabs: { id: Tab; label: string }[] = [
+			{ id: "overview", label: "🏠 Overview" },
 			{ id: "vision", label: "🎯 Vision" },
 			{ id: "outcomes", label: "🚀 Outcomes" },
 			{ id: "quarter", label: "📅 Quarter" },
@@ -583,15 +679,67 @@ class LifeCompassView extends ItemView {
 		}
 
 		const body = root.createDiv({ cls: "lc-tab-body" });
-		if (this.activeTab === "vision") this.renderVision(body);
+		if (this.activeTab === "overview") this.renderOverview(body);
+		else if (this.activeTab === "vision") this.renderVision(body);
 		else if (this.activeTab === "outcomes") this.renderOutcomes(body);
 		else this.renderQuarter(body);
 	}
 
 	// ---- Vision tab ----
+	// ---- Overview tab: a glance across all three tabs, since previously
+	// there was no way to see wheel + quarter + outcomes at once. ----
+	renderOverview(body: HTMLElement) {
+		body.addClass("lc-overview-root");
+
+		const ratings = WHEEL_CATEGORIES.map((c) => this.plugin.data.vision[c.key]?.rating ?? 0).filter((r) => r > 0);
+		const avgRating = ratings.length ? (ratings.reduce((a, b) => a + b, 0) / ratings.length).toFixed(1) : "—";
+		const visionCard = body.createDiv({ cls: "lc-overview-card" });
+		visionCard.createDiv({ text: "🎯 Vision", cls: "lc-field-label" });
+		visionCard.createDiv({
+			text: ratings.length ? `Average satisfaction: ${avgRating} / 10 across ${ratings.length} rated categories` : "No categories rated yet.",
+			cls: "lc-outcome-metric",
+		});
+
+		const current = this.plugin.data.quarters.find((q) => q.id === this.plugin.data.currentQuarterId);
+		const quarterCard = body.createDiv({ cls: "lc-overview-card" });
+		quarterCard.createDiv({ text: "📅 Current Quarter", cls: "lc-field-label" });
+		if (current) {
+			quarterCard.createDiv({ text: current.id, cls: "lc-outcome-title" });
+			if (current.priority) quarterCard.createDiv({ text: current.priority, cls: "lc-outcome-metric" });
+			if (current.deadline) quarterCard.createDiv({ text: daysUntil(current.deadline), cls: "lc-outcome-deadline" });
+		} else {
+			quarterCard.createDiv({ text: "No active quarter.", cls: "lc-outcomes-empty" });
+		}
+
+		const outcomes = this.plugin.data.outcomes;
+		const outcomesCard = body.createDiv({ cls: "lc-overview-card" });
+		outcomesCard.createDiv({ text: "🚀 Outcomes", cls: "lc-field-label" });
+		const active = outcomes.filter((o) => o.status === "active").length;
+		const done = outcomes.filter((o) => o.status === "done").length;
+		outcomesCard.createDiv({ text: `${active} active, ${done} done, ${outcomes.length} total`, cls: "lc-outcome-metric" });
+		for (const o of outcomes.filter((o) => o.status === "active")) {
+			const row = outcomesCard.createDiv({ cls: "lc-overview-outcome-row" });
+			row.createSpan({ text: o.name, cls: "lc-outcome-habit-name" });
+			const progressWrap = row.createDiv({ cls: "lc-progress-wrap lc-progress-wrap-compact" });
+			const progressTrack = progressWrap.createDiv({ cls: "lc-progress-track" });
+			const bar = progressTrack.createDiv({ cls: "lc-progress-bar" });
+			bar.style.width = `${Math.max(0, Math.min(100, o.progress ?? 0))}%`;
+			progressWrap.createSpan({ text: `${o.progress ?? 0}%`, cls: "lc-progress-label" });
+		}
+	}
+
 	renderVision(body: HTMLElement) {
 		body.addClass("lc-wheel-root");
-		body.appendChild(this.buildChart());
+		// A rating click only needs to update the chart + that row's button
+		// fill state — not tear down the whole tab (which would wipe
+		// whatever's typed but not yet blurred in any of the 7 prose
+		// textareas below).
+		const chartHolder = body.createDiv();
+		const redrawChart = () => {
+			chartHolder.empty();
+			chartHolder.appendChild(this.buildChart());
+		};
+		redrawChart();
 
 		const list = body.createDiv({ cls: "lc-wheel-list" });
 		for (const cat of WHEEL_CATEGORIES) {
@@ -601,21 +749,25 @@ class LifeCompassView extends ItemView {
 
 			const ratingRow = row.createDiv({ cls: "lc-wheel-rating-buttons" });
 			const current = this.plugin.data.vision[cat.key]?.rating ?? 0;
+			const buttons: HTMLButtonElement[] = [];
 			for (let n = 1; n <= 10; n++) {
 				const btn = ratingRow.createEl("button", { text: "" + n, cls: "lc-rating-btn" + (n <= current ? " lc-rating-btn-filled" : "") });
 				btn.type = "button";
 				btn.setAttr("aria-label", `Rate ${cat.label} ${n} out of 10`);
+				buttons.push(btn);
 				btn.onclick = async () => {
 					this.plugin.data.vision[cat.key].rating = n;
 					await this.plugin.persist();
-					this.render();
+					buttons.forEach((b, i) => b.toggleClass("lc-rating-btn-filled", i + 1 <= n));
+					redrawChart();
 				};
 			}
 
 			const prose = row.createEl("textarea", { cls: "lc-textarea lc-wheel-row-prose-input" });
 			prose.rows = 3;
-			prose.placeholder = "What would this category look like if everything went exceptionally well?";
+			prose.placeholder = "What would this category look like if everything was exactly how you wanted it?";
 			prose.value = this.plugin.data.vision[cat.key]?.prose ?? "";
+			prose.setAttr("aria-label", `${cat.label} vision`);
 			prose.onblur = async () => {
 				this.plugin.data.vision[cat.key].prose = prose.value;
 				await this.plugin.persist();
@@ -720,6 +872,12 @@ class LifeCompassView extends ItemView {
 			if (outcome.successMetric) card.createDiv({ text: outcome.successMetric, cls: "lc-outcome-metric" });
 			if (outcome.deadline) card.createDiv({ text: daysUntil(outcome.deadline), cls: "lc-outcome-deadline" });
 
+			const progressWrap = card.createDiv({ cls: "lc-progress-wrap" });
+			const progressTrack = progressWrap.createDiv({ cls: "lc-progress-track" });
+			const progressBar = progressTrack.createDiv({ cls: "lc-progress-bar" });
+			progressBar.style.width = `${Math.max(0, Math.min(100, outcome.progress ?? 0))}%`;
+			progressWrap.createSpan({ text: `${outcome.progress ?? 0}%`, cls: "lc-progress-label" });
+
 			const linkedQuarterIds = this.plugin.data.quarters.filter((q) => q.outcomeId === outcome.id).map((q) => q.id.toLowerCase());
 			const matchNames = new Set([outcome.name.toLowerCase(), ...linkedQuarterIds]);
 			const linkedHabits = (habits ?? []).filter((h) => h.linkedGoal && matchNames.has(h.linkedGoal.trim().toLowerCase()));
@@ -780,7 +938,19 @@ class LifeCompassView extends ItemView {
 		header.createSpan({ text: current.status, cls: "lc-outcome-status lc-outcome-status-" + current.status });
 		const editBtn = header.createEl("button", { text: "✏️ Edit", cls: "lc-icon-btn" });
 		editBtn.type = "button";
+		editBtn.setAttr("aria-label", "Edit quarter");
 		editBtn.onclick = () => new QuarterFormModal(this.plugin, current, () => this.render()).open();
+		const delBtn = header.createEl("button", { text: "🗑", cls: "lc-icon-btn" });
+		delBtn.type = "button";
+		delBtn.setAttr("aria-label", "Delete quarter");
+		delBtn.onclick = () => {
+			new ConfirmDeleteModal(this.plugin.app, current.id, async () => {
+				this.plugin.data.quarters = this.plugin.data.quarters.filter((q) => q.id !== current.id);
+				if (this.plugin.data.currentQuarterId === current.id) this.plugin.data.currentQuarterId = null;
+				await this.plugin.persist();
+				this.render();
+			}).open();
+		};
 
 		if (outcome) body.createDiv({ text: `Ladders up to: ${outcome.name}`, cls: "lc-outcome-category" });
 		if (current.successMetric) body.createDiv({ text: current.successMetric, cls: "lc-outcome-metric" });
@@ -801,7 +971,12 @@ class LifeCompassView extends ItemView {
 			});
 		}
 
-		this.renderMilestones(body, current);
+		const milestonesWrap = body.createDiv();
+		const redrawMilestones = () => {
+			milestonesWrap.empty();
+			this.renderMilestonesInto(milestonesWrap, current, redrawMilestones);
+		};
+		redrawMilestones();
 
 		const systemSection = body.createDiv({ cls: "lc-quarter-section" });
 		systemSection.createEl("h4", { text: "System" });
@@ -819,17 +994,29 @@ class LifeCompassView extends ItemView {
 			await this.plugin.persist();
 		});
 
-		this.renderCheckins(body, current);
+		const checkinsWrap = body.createDiv();
+		const redrawCheckins = () => {
+			checkinsWrap.empty();
+			this.renderCheckinsInto(checkinsWrap, current, redrawCheckins);
+		};
+		redrawCheckins();
 
 		const closeBtn = body.createEl("button", { text: "Start new quarter", cls: "lc-add-btn" });
 		closeBtn.type = "button";
-		closeBtn.onclick = async () => {
-			if (current.status === "active") {
-				current.status = "done";
-				current.updatedAt = todayStr();
-				await this.plugin.persist();
-			}
-			new QuarterFormModal(this.plugin, null, () => this.render()).open();
+		closeBtn.onclick = () => {
+			// Don't mark the current quarter done until the NEW quarter is
+			// actually saved — closing this form via Escape/click-outside
+			// used to leave the old quarter marked done with nothing to
+			// replace it.
+			new QuarterFormModal(this.plugin, null, () => {
+				if (current.status === "active") {
+					current.status = "done";
+					current.updatedAt = todayStr();
+					this.plugin.persist();
+				}
+				new Notice(`🎉 "${current.id}" closed out. On to the next one.`);
+				this.render();
+			}).open();
 		};
 
 		this.renderPastQuarters(body, current.id);
@@ -841,11 +1028,11 @@ class LifeCompassView extends ItemView {
 		const textarea = section.createEl("textarea", { cls: "lc-textarea" });
 		textarea.rows = 3;
 		textarea.value = value;
+		textarea.setAttr("aria-label", label);
 		textarea.onblur = () => onSave(textarea.value);
 	}
 
-	renderMilestones(container: HTMLElement, quarter: Quarter) {
-		const section = container.createDiv({ cls: "lc-quarter-section" });
+	renderMilestonesInto(section: HTMLElement, quarter: Quarter, redraw: () => void) {
 		section.createEl("h4", { text: "Monthly Milestones" });
 
 		quarter.milestones.forEach((group, gi) => {
@@ -855,10 +1042,13 @@ class LifeCompassView extends ItemView {
 			if (group.title) titleRow.createSpan({ text: " — " + group.title, cls: "lc-milestone-title" });
 			const delGroupBtn = titleRow.createEl("button", { text: "×", cls: "lc-milestone-remove" });
 			delGroupBtn.type = "button";
-			delGroupBtn.onclick = async () => {
-				quarter.milestones.splice(gi, 1);
-				await this.plugin.persist();
-				this.render();
+			delGroupBtn.setAttr("aria-label", `Delete ${group.month} milestones`);
+			delGroupBtn.onclick = () => {
+				new ConfirmDeleteModal(this.plugin.app, `${group.month} milestones (${group.items.length} item${group.items.length === 1 ? "" : "s"})`, async () => {
+					quarter.milestones.splice(gi, 1);
+					await this.plugin.persist();
+					redraw();
+				}).open();
 			};
 
 			const itemsList = groupEl.createDiv({ cls: "lc-milestone-items" });
@@ -867,82 +1057,75 @@ class LifeCompassView extends ItemView {
 				const cb = row.createEl("input", { cls: "lc-milestone-checkbox" });
 				cb.type = "checkbox";
 				cb.checked = item.done;
+				cb.setAttr("aria-label", item.text);
 				cb.onchange = async () => {
 					item.done = cb.checked;
 					await this.plugin.persist();
-					this.render();
+					if (item.done) {
+						row.addClass("lc-milestone-item-pop");
+						const allDone = group.items.every((it) => it.done);
+						if (allDone) {
+							new Notice(`🎉 ${group.month} milestones all done!`);
+							groupEl.addClass("lc-milestone-group-celebrate");
+							window.setTimeout(() => groupEl.removeClass("lc-milestone-group-celebrate"), 1400);
+						}
+					}
+					redraw();
 				};
 				row.createSpan({ text: item.text, cls: "lc-milestone-item-text" + (item.done ? " lc-milestone-item-done" : "") });
 				const delItemBtn = row.createEl("button", { text: "×", cls: "lc-milestone-remove" });
 				delItemBtn.type = "button";
+				delItemBtn.setAttr("aria-label", `Delete "${item.text}"`);
 				delItemBtn.onclick = async () => {
 					group.items.splice(ii, 1);
 					await this.plugin.persist();
-					this.render();
+					redraw();
 				};
 			});
 
 			const addItemRow = groupEl.createDiv({ cls: "lc-milestone-add-row" });
 			const addItemInput = addItemRow.createEl("input", { cls: "lc-inline-input" });
 			addItemInput.placeholder = "Add a milestone item…";
+			addItemInput.setAttr("aria-label", `Add a milestone item to ${group.month}`);
 			const addItemBtn = addItemRow.createEl("button", { text: "+", cls: "lc-icon-btn" });
 			addItemBtn.type = "button";
+			addItemBtn.setAttr("aria-label", "Add item");
 			addItemBtn.onclick = async () => {
 				if (!addItemInput.value.trim()) return;
 				group.items.push({ text: addItemInput.value.trim(), done: false });
 				await this.plugin.persist();
-				this.render();
+				redraw();
 			};
 		});
 
 		const addGroupRow = section.createDiv({ cls: "lc-milestone-add-group" });
 		const monthInput = addGroupRow.createEl("input", { cls: "lc-inline-input" });
 		monthInput.placeholder = "Month, e.g. October 2026";
+		monthInput.setAttr("aria-label", "New milestone month");
 		const titleInput = addGroupRow.createEl("input", { cls: "lc-inline-input" });
 		titleInput.placeholder = "Title, e.g. Scale & Convert";
+		titleInput.setAttr("aria-label", "New milestone month title");
 		const addGroupBtn = addGroupRow.createEl("button", { text: "+ Add Month" });
 		addGroupBtn.type = "button";
 		addGroupBtn.onclick = async () => {
 			if (!monthInput.value.trim()) return;
 			quarter.milestones.push({ month: monthInput.value.trim(), title: titleInput.value.trim(), items: [] });
 			await this.plugin.persist();
-			this.render();
+			redraw();
 		};
 	}
 
-	renderCheckins(container: HTMLElement, quarter: Quarter) {
-		const section = container.createDiv({ cls: "lc-quarter-section" });
+	renderCheckinsInto(section: HTMLElement, quarter: Quarter, redraw: () => void) {
+		section.addClass("lc-quarter-section");
 		section.createEl("h4", { text: "Check-ins" });
 
-		if (quarter.checkinFields.length === 0) {
-			section.createDiv({ text: "No check-in fields defined yet — add some by editing this quarter.", cls: "lc-outcomes-empty" });
-			return;
-		}
+		renderCheckinTodayForm(section, this.plugin, quarter, () => {
+			redraw();
+			this.plugin.refreshDailyBlocksOnly();
+		});
 
-		const today = todayStr();
-		const todayValues = quarter.checkins[today] ?? {};
-		const form = section.createDiv({ cls: "lc-checkin-form" });
-		const inputs: Record<string, HTMLInputElement> = {};
-		for (const field of quarter.checkinFields) {
-			const row = form.createDiv({ cls: "lc-checkin-field-row" });
-			row.createSpan({ text: field.label, cls: "lc-checkin-field-label" });
-			const input = row.createEl("input", { cls: "lc-inline-input" });
-			input.type = field.type === "number" ? "number" : "text";
-			input.value = todayValues[field.key] !== undefined ? "" + todayValues[field.key] : "";
-			inputs[field.key] = input;
-		}
-		const saveBtn = form.createEl("button", { text: `Save today (${today})`, cls: "mod-cta" });
-		saveBtn.type = "button";
-		saveBtn.onclick = async () => {
-			const entry: Record<string, string | number> = {};
-			for (const field of quarter.checkinFields) {
-				const raw = inputs[field.key].value;
-				entry[field.key] = field.type === "number" ? Number(raw) || 0 : raw;
-			}
-			quarter.checkins[today] = entry;
-			await this.plugin.persist();
-			this.render();
-		};
+		const heatmap = buildCheckinHeatmap(quarter);
+		if (heatmap) section.appendChild(heatmap);
 
 		const dates = Object.keys(quarter.checkins).sort().reverse();
 		if (dates.length) {
@@ -963,18 +1146,36 @@ class LifeCompassView extends ItemView {
 		const past = this.plugin.data.quarters.filter((q) => q.id !== currentId);
 		if (!past.length) return;
 		const section = container.createDiv({ cls: "lc-quarter-section" });
-		section.createEl("h4", { text: "Past Quarters" });
+		const toggle = section.createEl("h4", { text: `▸ Past Quarters (${past.length})`, cls: "lc-collapsible-toggle" });
+		const list = section.createDiv({ cls: "lc-collapsible-body" });
+		toggle.onclick = () => {
+			const nowOpen = !list.hasClass("lc-collapsible-body-open");
+			list.toggleClass("lc-collapsible-body-open", nowOpen);
+			toggle.setText(`${nowOpen ? "▾" : "▸"} Past Quarters (${past.length})`);
+		};
 		for (const q of past) {
 			const outcome = this.plugin.data.outcomes.find((o) => o.id === q.outcomeId);
-			const card = section.createDiv({ cls: "lc-quarter-past-card" });
+			const card = list.createDiv({ cls: "lc-quarter-past-card" });
 			const header = card.createDiv({ cls: "lc-outcome-header" });
 			header.createDiv({ text: q.id, cls: "lc-outcome-title" });
 			header.createSpan({ text: q.status, cls: "lc-outcome-status lc-outcome-status-" + q.status });
 			if (q.priority) card.createDiv({ text: q.priority, cls: "lc-outcome-metric" });
 			if (outcome) card.createDiv({ text: `Ladders up to: ${outcome.name}`, cls: "lc-outcome-category" });
-			const editBtn = card.createEl("button", { text: "✏️ Edit", cls: "lc-icon-btn" });
+			const actions = card.createDiv({ cls: "lc-outcome-actions lc-quarter-past-actions" });
+			const editBtn = actions.createEl("button", { text: "✏️", cls: "lc-icon-btn" });
 			editBtn.type = "button";
+			editBtn.setAttr("aria-label", `Edit ${q.id}`);
 			editBtn.onclick = () => new QuarterFormModal(this.plugin, q, () => this.render()).open();
+			const delBtn = actions.createEl("button", { text: "🗑", cls: "lc-icon-btn" });
+			delBtn.type = "button";
+			delBtn.setAttr("aria-label", `Delete ${q.id}`);
+			delBtn.onclick = () => {
+				new ConfirmDeleteModal(this.plugin.app, q.id, async () => {
+					this.plugin.data.quarters = this.plugin.data.quarters.filter((qq) => qq.id !== q.id);
+					await this.plugin.persist();
+					this.render();
+				}).open();
+			};
 		}
 	}
 }
@@ -1021,6 +1222,7 @@ class OutcomeFormModal extends Modal {
 		successMetric: string;
 		why: string;
 		baseline: string;
+		progress: number;
 	};
 
 	constructor(plugin: LifeCompassPlugin, existing: Outcome | null, onDone: () => void) {
@@ -1037,6 +1239,7 @@ class OutcomeFormModal extends Modal {
 					successMetric: existing.successMetric,
 					why: existing.why,
 					baseline: existing.baseline ?? "",
+					progress: existing.progress ?? 0,
 			  }
 			: {
 					name: "",
@@ -1046,6 +1249,7 @@ class OutcomeFormModal extends Modal {
 					successMetric: "",
 					why: "",
 					baseline: "",
+					progress: 0,
 			  };
 	}
 
@@ -1076,6 +1280,16 @@ class OutcomeFormModal extends Modal {
 		new Setting(contentEl)
 			.setName("Baseline (optional)")
 			.addTextArea((t) => t.setValue(this.values.baseline).onChange((v) => (this.values.baseline = v)));
+		new Setting(contentEl)
+			.setName("Progress")
+			.setDesc("How far along toward the Success Metric, 0-100%.")
+			.addSlider((s) =>
+				s
+					.setLimits(0, 100, 5)
+					.setValue(this.values.progress)
+					.setDynamicTooltip()
+					.onChange((v) => (this.values.progress = v))
+			);
 
 		const footer = contentEl.createDiv({ cls: "lc-modal-footer" });
 		const saveBtn = footer.createEl("button", { text: "Save", cls: "mod-cta" });
@@ -1094,6 +1308,7 @@ class OutcomeFormModal extends Modal {
 				this.existing.successMetric = this.values.successMetric;
 				this.existing.why = this.values.why;
 				this.existing.baseline = this.values.baseline || undefined;
+				this.existing.progress = this.values.progress;
 				this.existing.updatedAt = now;
 			} else {
 				this.plugin.data.outcomes.push({
@@ -1105,6 +1320,7 @@ class OutcomeFormModal extends Modal {
 					successMetric: this.values.successMetric,
 					why: this.values.why,
 					baseline: this.values.baseline || undefined,
+					progress: this.values.progress,
 					createdAt: now,
 					updatedAt: now,
 				});
@@ -1211,11 +1427,13 @@ class QuarterFormModal extends Modal {
 				const nameInput = row.createEl("input", { cls: "lc-inline-input" });
 				nameInput.placeholder = "Field name, e.g. emails";
 				nameInput.value = field.label;
+				nameInput.setAttr("aria-label", "Check-in field name");
 				nameInput.oninput = () => {
 					field.key = slugify(nameInput.value) || `field-${i}`;
 					field.label = nameInput.value;
 				};
 				const typeSelect = row.createEl("select", { cls: "dropdown" });
+				typeSelect.setAttr("aria-label", "Check-in field type");
 				typeSelect.createEl("option", { text: "Number", value: "number" });
 				typeSelect.createEl("option", { text: "Text", value: "text" });
 				typeSelect.value = field.type;
@@ -1224,6 +1442,7 @@ class QuarterFormModal extends Modal {
 				};
 				const removeBtn = row.createEl("button", { text: "×", cls: "lc-milestone-remove" });
 				removeBtn.type = "button";
+				removeBtn.setAttr("aria-label", "Remove this field");
 				removeBtn.onclick = () => {
 					this.checkinFieldsDraft.splice(i, 1);
 					redrawFields();
@@ -1247,9 +1466,11 @@ class QuarterFormModal extends Modal {
 				new Notice("Quarter ID is required.");
 				return;
 			}
-			const checkinFields: CheckinField[] = this.checkinFieldsDraft
-				.filter((f) => f.label.trim())
-				.map((f) => ({ key: f.key, label: f.label.trim(), type: f.type }));
+			if (this.checkinFieldsDraft.some((f) => !f.label.trim())) {
+				new Notice("Give every check-in field a name, or remove the blank one(s).");
+				return;
+			}
+			const checkinFields: CheckinField[] = this.checkinFieldsDraft.map((f) => ({ key: f.key, label: f.label.trim(), type: f.type }));
 			const now = todayStr();
 
 			if (this.existing) {
@@ -1333,36 +1554,10 @@ class DailyQuarterBlock extends MarkdownRenderChild {
 			el.createDiv({ text: current.priority, cls: "lc-daily-priority" });
 		}
 
-		if (current.checkinFields.length === 0) {
-			el.createDiv({ text: "No check-in fields defined for this quarter yet.", cls: "lc-outcomes-empty" });
-			return;
-		}
-
-		const today = todayStr();
-		const todayValues = current.checkins[today] ?? {};
-		const form = el.createDiv({ cls: "lc-checkin-form" });
-		const inputs: Record<string, HTMLInputElement> = {};
-		for (const field of current.checkinFields) {
-			const row = form.createDiv({ cls: "lc-checkin-field-row" });
-			row.createSpan({ text: field.label, cls: "lc-checkin-field-label" });
-			const input = row.createEl("input", { cls: "lc-inline-input" });
-			input.type = field.type === "number" ? "number" : "text";
-			input.value = todayValues[field.key] !== undefined ? "" + todayValues[field.key] : "";
-			inputs[field.key] = input;
-		}
-		const saveBtn = form.createEl("button", { text: "Save today", cls: "mod-cta" });
-		saveBtn.type = "button";
-		saveBtn.onclick = async () => {
-			const entry: Record<string, string | number> = {};
-			for (const field of current.checkinFields) {
-				const raw = inputs[field.key].value;
-				entry[field.key] = field.type === "number" ? Number(raw) || 0 : raw;
-			}
-			current.checkins[today] = entry;
-			await this.plugin.persist();
-			new Notice("Check-in saved.");
-			this.plugin.refreshViews();
-		};
+		renderCheckinTodayForm(el, this.plugin, current, () => {
+			this.render();
+			this.plugin.refreshMainViewOnly();
+		});
 	}
 }
 
@@ -1478,6 +1673,18 @@ export default class LifeCompassPlugin extends Plugin {
 		}).open();
 	}
 
+	async exportData() {
+		const path = `Life Compass Backup ${todayStr()}.json`;
+		const content = JSON.stringify(this.data, null, 2);
+		const existing = this.app.vault.getAbstractFileByPath(path);
+		if (existing instanceof TFile) {
+			await this.app.vault.modify(existing, content);
+		} else {
+			await this.app.vault.create(path, content);
+		}
+		new Notice(`Exported to "${path}".`);
+	}
+
 	async initSupabase() {
 		this.supabase = createClient(this.settings.supabaseUrl, this.settings.supabaseAnonKey);
 		this.initializedCredsKey = `${this.settings.supabaseUrl}|${this.settings.supabaseAnonKey}`;
@@ -1537,7 +1744,11 @@ export default class LifeCompassPlugin extends Plugin {
 	async connectRemote() {
 		if (!this.supabase || !this.session) return;
 
-		const { data: row } = await this.supabase.from(SYNC_TABLE).select("data").eq("user_id", this.session.user.id).maybeSingle();
+		const { data: row, error } = await this.supabase.from(SYNC_TABLE).select("data").eq("user_id", this.session.user.id).maybeSingle();
+		if (error) {
+			new Notice(`Couldn't reach Supabase to sync: ${error.message}. Using local data for now.`);
+			return;
+		}
 
 		if (row?.data) {
 			this.data = mergeData(this.data, row.data as PluginData);
@@ -1588,24 +1799,49 @@ export default class LifeCompassPlugin extends Plugin {
 		});
 	}
 
+	// The local save always happens immediately (every caller needs fresh
+	// data to re-render from), but the Supabase upload is debounced —
+	// typing across several fields in a row previously re-uploaded the
+	// ENTIRE dataset (all outcomes/quarters/check-in history) on every
+	// single blur. Coalescing rapid edits into one upload after a short
+	// quiet period cuts that down without changing any call site's
+	// await-then-continue behavior.
+	private supabasePushTimer: number | null = null;
+
 	async persist() {
 		await this.saveLocal();
-		if (this.supabase && this.session) {
+		if (!this.supabase || !this.session) return;
+		if (this.supabasePushTimer) window.clearTimeout(this.supabasePushTimer);
+		this.supabasePushTimer = window.setTimeout(async () => {
+			if (!this.supabase || !this.session) return;
 			const { error } = await this.supabase.from(SYNC_TABLE).upsert({
 				user_id: this.session.user.id,
 				data: this.data,
 				updated_at: new Date().toISOString(),
 			});
-			if (error) {
-				new Notice(`Sync failed, saved locally only: ${error.message}`);
-			}
-		}
+			if (error) new Notice(`Sync failed, saved locally only: ${error.message}`);
+		}, 800);
 	}
 
+	// Full refresh — used for realtime remote updates and after migration,
+	// where every tab's data may have changed. Skips re-rendering the main
+	// view while a textarea inside it is focused, so an incoming change
+	// from another device can't wipe out something you're mid-typing.
 	refreshViews() {
+		this.refreshMainViewOnly();
+		this.refreshDailyBlocksOnly();
+	}
+
+	refreshMainViewOnly() {
 		this.app.workspace.getLeavesOfType(VIEW_TYPE).forEach((leaf) => {
-			if (leaf.view instanceof LifeCompassView) leaf.view.render();
+			if (!(leaf.view instanceof LifeCompassView)) return;
+			const active = document.activeElement;
+			const isTyping = active instanceof HTMLTextAreaElement && leaf.view.contentEl.contains(active);
+			if (!isTyping) leaf.view.render();
 		});
+	}
+
+	refreshDailyBlocksOnly() {
 		for (const block of this.dailyBlocks) block.render();
 	}
 

@@ -560,10 +560,155 @@ body.theme-dark {
 	margin-bottom: var(--lc-space-3);
 }
 
+/* ---- Overview tab ---- */
+
+.lc-overview-root {
+	display: flex;
+	flex-direction: column;
+	gap: var(--lc-space-3);
+}
+
+.lc-overview-card {
+	padding: var(--lc-space-3) var(--lc-space-4);
+	border: 1px solid var(--background-modifier-border);
+	border-radius: var(--lc-radius-xl);
+	background-color: var(--background-primary-alt, var(--background-secondary));
+}
+
+.lc-overview-outcome-row {
+	display: flex;
+	align-items: center;
+	gap: var(--lc-space-3);
+	padding: 4px 0;
+}
+
+/* ---- Progress bar (Outcome cards + Overview) ---- */
+
+.lc-progress-wrap {
+	display: flex;
+	align-items: center;
+	gap: 8px;
+	margin-bottom: 8px;
+}
+
+.lc-progress-wrap-compact {
+	flex-grow: 1;
+	margin-bottom: 0;
+}
+
+.lc-progress-track {
+	flex-grow: 1;
+	height: 6px;
+	border-radius: 999px;
+	background-color: var(--background-modifier-border);
+	overflow: hidden;
+}
+
+.lc-progress-bar {
+	height: 100%;
+	border-radius: 999px;
+	background-color: var(--lc-outcome-color, var(--interactive-accent));
+	transition: width 0.2s ease;
+}
+
+.lc-progress-label {
+	font-size: 0.72em;
+	color: var(--text-muted);
+	flex-shrink: 0;
+	width: 32px;
+	text-align: right;
+}
+
+/* ---- Collapsible (Past Quarters) ---- */
+
+.lc-collapsible-toggle {
+	cursor: pointer;
+	user-select: none;
+}
+
+.lc-collapsible-toggle:hover {
+	color: var(--text-normal);
+}
+
+.lc-collapsible-body {
+	display: none;
+}
+
+.lc-collapsible-body-open {
+	display: block;
+}
+
+.lc-quarter-past-actions {
+	position: static;
+	justify-content: flex-end;
+	margin-top: 6px;
+}
+
+/* ---- Check-in heatmap ---- */
+
+.lc-heatmap-wrap {
+	margin: var(--lc-space-3) 0;
+}
+
+.lc-heatmap-grid {
+	display: flex;
+	flex-wrap: wrap;
+	gap: 3px;
+}
+
+.lc-heatmap-cell {
+	width: 14px;
+	height: 14px;
+	border-radius: 3px;
+	background-color: var(--background-modifier-border);
+	cursor: default;
+}
+
+.lc-heatmap-cell-filled {
+	background-color: var(--interactive-accent);
+}
+
+/* ---- Milestone celebration ---- */
+
+@keyframes lc-pop {
+	0% {
+		transform: scale(1);
+	}
+	40% {
+		transform: scale(1.03);
+	}
+	100% {
+		transform: scale(1);
+	}
+}
+
+.lc-milestone-item-pop {
+	animation: lc-pop 0.25s ease-out;
+}
+
+@keyframes lc-celebrate {
+	0%,
+	100% {
+		box-shadow: none;
+	}
+	40% {
+		box-shadow: 0 0 0 3px color-mix(in srgb, var(--interactive-accent) 45%, transparent);
+	}
+}
+
+.lc-milestone-group-celebrate {
+	animation: lc-celebrate 1.4s ease-out;
+	border-radius: var(--lc-radius-md);
+}
+
 /* ---- Modals ---- */
 
 .lc-modal h3 {
 	margin-top: 0;
+}
+
+.lc-modal-summary {
+	white-space: pre-wrap;
 }
 
 .lc-modal-footer {
