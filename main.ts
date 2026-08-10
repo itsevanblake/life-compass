@@ -74,6 +74,7 @@ interface Outcome {
 	obstacles?: string;
 	progress: number; // 0-100, manually set
 	linkedHabitIds: string[]; // explicit links to habit-tracker habit IDs, picked in the edit modal
+	archived?: boolean; // hidden from the main Outcomes grid/Overview, kept (not deleted) under "Archived Outcomes"
 	createdAt: string;
 	updatedAt: string;
 }
@@ -727,7 +728,7 @@ class LifeCompassView extends ItemView {
 			quarterCard.createDiv({ text: "No active quarter.", cls: "lc-outcomes-empty" });
 		}
 
-		const outcomes = this.plugin.data.outcomes;
+		const outcomes = this.plugin.data.outcomes.filter((o) => !o.archived);
 		const outcomesCard = body.createDiv({ cls: "lc-overview-card" });
 		outcomesCard.createDiv({ text: "🚀 Outcomes", cls: "lc-field-label" });
 		const active = outcomes.filter((o) => o.status === "active").length;
@@ -927,67 +928,111 @@ class LifeCompassView extends ItemView {
 		}
 
 		const habits = getHabitTrackerHabits(this.plugin.app);
-		const grid = body.createDiv({ cls: "lc-outcomes-grid" });
-		for (const outcome of this.plugin.data.outcomes) {
-			const card = grid.createDiv({ cls: "lc-outcome-card" });
-			card.style.setProperty("--lc-outcome-color", categoryColor(this.plugin.data.categories, outcome.visionCategory));
+		const active = this.plugin.data.outcomes.filter((o) => !o.archived);
+		const archived = this.plugin.data.outcomes.filter((o) => o.archived);
 
-			const header = card.createDiv({ cls: "lc-outcome-header" });
-			header.createDiv({ text: outcome.name, cls: "lc-outcome-title" });
-			header.createSpan({ text: outcome.status, cls: "lc-outcome-status lc-outcome-status-" + outcome.status });
+		if (active.length === 0) {
+			body.createDiv({ text: "No active outcomes — add one above, or restore one from Archived Outcomes below.", cls: "lc-outcomes-empty" });
+		} else {
+			const grid = body.createDiv({ cls: "lc-outcomes-grid" });
+			for (const outcome of active) this.renderOutcomeCard(grid, outcome, habits, false);
+		}
 
-			const catLabel = this.plugin.data.categories.find((c) => c.key === outcome.visionCategory)?.label;
-			if (catLabel) card.createDiv({ text: catLabel, cls: "lc-outcome-category" });
-			if (outcome.successMetric) card.createDiv({ text: outcome.successMetric, cls: "lc-outcome-metric" });
-			if (outcome.deadline) card.createDiv({ text: daysUntil(outcome.deadline), cls: "lc-outcome-deadline" });
-
-			const progressWrap = card.createDiv({ cls: "lc-progress-wrap" });
-			const progressTrack = progressWrap.createDiv({ cls: "lc-progress-track" });
-			const progressBar = progressTrack.createDiv({ cls: "lc-progress-bar" });
-			progressBar.style.width = `${Math.max(0, Math.min(100, outcome.progress ?? 0))}%`;
-			progressWrap.createSpan({ text: `${outcome.progress ?? 0}%`, cls: "lc-progress-label" });
-
-			const linkedQuarterIds = this.plugin.data.quarters.filter((q) => q.outcomeId === outcome.id).map((q) => q.id.toLowerCase());
-			const matchNames = new Set([outcome.name.toLowerCase(), ...linkedQuarterIds]);
-			const explicitIds = new Set(outcome.linkedHabitIds ?? []);
-			const linkedHabits = (habits ?? []).filter(
-				(h) => explicitIds.has(h.id) || (h.linkedGoal && matchNames.has(h.linkedGoal.trim().toLowerCase()))
-			);
-
-			if (linkedHabits.length) {
-				const systemEl = card.createDiv({ cls: "lc-outcome-system" });
-				systemEl.createDiv({ text: "Goal Supporting Habits", cls: "lc-outcome-system-label" });
-				for (const h of linkedHabits) {
-					const row = systemEl.createDiv({ cls: "lc-outcome-habit-row" });
-					const dot = row.createSpan({ cls: "lc-outcome-habit-dot" });
-					dot.style.backgroundColor = h.color;
-					row.createSpan({ text: h.name, cls: "lc-outcome-habit-name" });
-					row.createSpan({ text: `🔥 ${getHabitStreak(this.plugin.app, h.id)}`, cls: "lc-outcome-habit-streak" });
-				}
-			} else if (habits) {
-				card.createDiv({ text: "No linked habits yet", cls: "lc-outcome-system-empty" });
-			}
-
-			const actions = card.createDiv({ cls: "lc-outcome-actions" });
-			const editBtn = actions.createEl("button", { text: "✏️", cls: "lc-icon-btn" });
-			editBtn.type = "button";
-			editBtn.setAttr("aria-label", "Edit outcome");
-			editBtn.onclick = (e) => {
-				e.stopPropagation();
-				new OutcomeFormModal(this.plugin, outcome, () => this.render()).open();
+		if (archived.length) {
+			const section = body.createDiv({ cls: "lc-quarter-section" });
+			const toggle = section.createEl("h4", { text: `▸ Archived Outcomes (${archived.length})`, cls: "lc-collapsible-toggle" });
+			const list = section.createDiv({ cls: "lc-collapsible-body lc-outcomes-grid" });
+			toggle.onclick = () => {
+				const nowOpen = !list.hasClass("lc-collapsible-body-open");
+				list.toggleClass("lc-collapsible-body-open", nowOpen);
+				toggle.setText(`${nowOpen ? "▾" : "▸"} Archived Outcomes (${archived.length})`);
 			};
-			const delBtn = actions.createEl("button", { text: "🗑", cls: "lc-icon-btn" });
-			delBtn.type = "button";
-			delBtn.setAttr("aria-label", "Delete outcome");
-			delBtn.onclick = (e) => {
+			for (const outcome of archived) this.renderOutcomeCard(list, outcome, habits, true);
+		}
+	}
+
+	renderOutcomeCard(container: HTMLElement, outcome: Outcome, habits: LinkedHabitLite[] | null, archived: boolean) {
+		const card = container.createDiv({ cls: "lc-outcome-card" });
+		card.style.setProperty("--lc-outcome-color", categoryColor(this.plugin.data.categories, outcome.visionCategory));
+
+		const header = card.createDiv({ cls: "lc-outcome-header" });
+		header.createDiv({ text: outcome.name, cls: "lc-outcome-title" });
+		header.createSpan({ text: outcome.status, cls: "lc-outcome-status lc-outcome-status-" + outcome.status });
+
+		const catLabel = this.plugin.data.categories.find((c) => c.key === outcome.visionCategory)?.label;
+		if (catLabel) card.createDiv({ text: catLabel, cls: "lc-outcome-category" });
+		if (outcome.successMetric) card.createDiv({ text: outcome.successMetric, cls: "lc-outcome-metric" });
+		if (outcome.deadline) card.createDiv({ text: daysUntil(outcome.deadline), cls: "lc-outcome-deadline" });
+
+		const progressWrap = card.createDiv({ cls: "lc-progress-wrap" });
+		const progressTrack = progressWrap.createDiv({ cls: "lc-progress-track" });
+		const progressBar = progressTrack.createDiv({ cls: "lc-progress-bar" });
+		progressBar.style.width = `${Math.max(0, Math.min(100, outcome.progress ?? 0))}%`;
+		progressWrap.createSpan({ text: `${outcome.progress ?? 0}%`, cls: "lc-progress-label" });
+
+		const linkedQuarterIds = this.plugin.data.quarters.filter((q) => q.outcomeId === outcome.id).map((q) => q.id.toLowerCase());
+		const matchNames = new Set([outcome.name.toLowerCase(), ...linkedQuarterIds]);
+		const explicitIds = new Set(outcome.linkedHabitIds ?? []);
+		const linkedHabits = (habits ?? []).filter(
+			(h) => explicitIds.has(h.id) || (h.linkedGoal && matchNames.has(h.linkedGoal.trim().toLowerCase()))
+		);
+
+		if (linkedHabits.length) {
+			const systemEl = card.createDiv({ cls: "lc-outcome-system" });
+			systemEl.createDiv({ text: "Goal Supporting Habits", cls: "lc-outcome-system-label" });
+			for (const h of linkedHabits) {
+				const row = systemEl.createDiv({ cls: "lc-outcome-habit-row" });
+				const dot = row.createSpan({ cls: "lc-outcome-habit-dot" });
+				dot.style.backgroundColor = h.color;
+				row.createSpan({ text: h.name, cls: "lc-outcome-habit-name" });
+				row.createSpan({ text: `🔥 ${getHabitStreak(this.plugin.app, h.id)}`, cls: "lc-outcome-habit-streak" });
+			}
+		} else if (habits) {
+			card.createDiv({ text: "No linked habits yet", cls: "lc-outcome-system-empty" });
+		}
+
+		const actions = card.createDiv({ cls: "lc-outcome-actions" });
+		if (archived) {
+			const restoreBtn = actions.createEl("button", { text: "↩️", cls: "lc-icon-btn" });
+			restoreBtn.type = "button";
+			restoreBtn.setAttr("aria-label", "Restore outcome");
+			restoreBtn.onclick = async (e) => {
 				e.stopPropagation();
-				new ConfirmDeleteModal(this.plugin.app, outcome.name, async () => {
-					this.plugin.data.outcomes = this.plugin.data.outcomes.filter((o) => o.id !== outcome.id);
-					await this.plugin.persist();
-					this.render();
-				}).open();
+				outcome.archived = false;
+				outcome.updatedAt = todayStr();
+				await this.plugin.persist();
+				this.render();
+			};
+		} else {
+			const archiveBtn = actions.createEl("button", { text: "📦", cls: "lc-icon-btn" });
+			archiveBtn.type = "button";
+			archiveBtn.setAttr("aria-label", "Archive outcome");
+			archiveBtn.onclick = async (e) => {
+				e.stopPropagation();
+				outcome.archived = true;
+				outcome.updatedAt = todayStr();
+				await this.plugin.persist();
+				this.render();
 			};
 		}
+		const editBtn = actions.createEl("button", { text: "✏️", cls: "lc-icon-btn" });
+		editBtn.type = "button";
+		editBtn.setAttr("aria-label", "Edit outcome");
+		editBtn.onclick = (e) => {
+			e.stopPropagation();
+			new OutcomeFormModal(this.plugin, outcome, () => this.render()).open();
+		};
+		const delBtn = actions.createEl("button", { text: "🗑", cls: "lc-icon-btn" });
+		delBtn.type = "button";
+		delBtn.setAttr("aria-label", "Delete outcome");
+		delBtn.onclick = (e) => {
+			e.stopPropagation();
+			new ConfirmDeleteModal(this.plugin.app, outcome.name, async () => {
+				this.plugin.data.outcomes = this.plugin.data.outcomes.filter((o) => o.id !== outcome.id);
+				await this.plugin.persist();
+				this.render();
+			}).open();
+		};
 	}
 
 	// ---- Quarter tab ----
