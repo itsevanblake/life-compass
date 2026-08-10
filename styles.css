@@ -209,10 +209,11 @@ body.theme-dark {
 }
 
 .lc-rating-btn-filled {
-	background-color: var(--lc-cat-color, var(--interactive-accent));
-	border-color: transparent;
-	color: #ffffff;
+	background-color: var(--lc-cat-color, var(--interactive-accent)) !important;
+	border-color: transparent !important;
+	color: #ffffff !important;
 	font-weight: 700;
+	box-shadow: none !important;
 }
 
 .lc-wheel-row-prose-input {
