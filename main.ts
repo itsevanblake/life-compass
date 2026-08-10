@@ -463,6 +463,12 @@ export default class LifeCompassPlugin extends Plugin {
 	session: Session | null = null;
 	private realtimeChannel: RealtimeChannel | null = null;
 	private visionBlocks: Set<LifeVisionBlock> = new Set();
+	// Credentials the current `supabase` client was actually built from —
+	// lets saveSettings() tell "the URL/key changed" apart from "an
+	// unrelated setting changed while these two were already filled in",
+	// so fixing a typo'd URL/key actually takes effect instead of the
+	// original (possibly wrong) client silently sticking around.
+	private initializedCredsKey = "";
 
 	async onload() {
 		const saved = await this.loadData();
@@ -492,6 +498,7 @@ export default class LifeCompassPlugin extends Plugin {
 
 	async initSupabase() {
 		this.supabase = createClient(this.settings.supabaseUrl, this.settings.supabaseAnonKey);
+		this.initializedCredsKey = `${this.settings.supabaseUrl}|${this.settings.supabaseAnonKey}`;
 		const { data } = await this.supabase.auth.getSession();
 		if (data.session) {
 			this.session = data.session;
@@ -501,7 +508,8 @@ export default class LifeCompassPlugin extends Plugin {
 
 	async saveSettings() {
 		await this.saveLocal();
-		if (this.settings.supabaseUrl && this.settings.supabaseAnonKey && !this.supabase) {
+		const credsKey = `${this.settings.supabaseUrl}|${this.settings.supabaseAnonKey}`;
+		if (this.settings.supabaseUrl && this.settings.supabaseAnonKey && credsKey !== this.initializedCredsKey) {
 			await this.initSupabase();
 		}
 	}
