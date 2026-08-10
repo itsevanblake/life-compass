@@ -6,7 +6,7 @@
 
 create table if not exists public.life_compass_data (
   user_id uuid primary key references auth.users (id) on delete cascade,
-  data jsonb not null default '{"wheelRatings": {}}'::jsonb,
+  data jsonb not null default '{"vision": {}, "outcomes": [], "quarters": [], "currentQuarterId": null}'::jsonb,
   updated_at timestamptz not null default now()
 );
 

@@ -1,9 +1,9 @@
 {
   "id": "life-compass",
   "name": "Life Compass",
-  "version": "1.0.1",
+  "version": "2.0.0",
   "minAppVersion": "1.4.0",
-  "description": "Interactive Wheel of Life vision-setting and goal-outcome cards for the Goals/ system, with real-time cross-device sync.",
+  "description": "All-in-one Vision, Outcomes, and Quarterly goal system with a Wheel of Life, real-time Supabase sync, and habit-tracker integration — no markdown notes required.",
   "author": "Evan Gooch",
   "isDesktopOnly": false
 }

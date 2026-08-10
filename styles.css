@@ -7,27 +7,121 @@
 	--lc-radius-lg: 10px;
 	--lc-radius-xl: 12px;
 	--lc-shadow-sm: 0 1px 6px rgba(0, 0, 0, 0.08);
+	--lc-shadow-md: 0 6px 20px rgba(0, 0, 0, 0.18);
 }
 
 body.theme-dark {
 	--lc-shadow-sm: 0 1px 6px rgba(0, 0, 0, 0.35);
+	--lc-shadow-md: 0 8px 24px rgba(0, 0, 0, 0.55);
 }
 
-/* Break out of Obsidian's Readable Line Length column, same reasoning as
-   the habit tracker plugin. */
-.markdown-preview-sizer:has(.lc-wheel-root),
-.markdown-source-view.mod-cm6 .cm-sizer:has(.lc-wheel-root),
-.markdown-preview-sizer:has(.lc-outcomes-root),
-.markdown-source-view.mod-cm6 .cm-sizer:has(.lc-outcomes-root) {
-	max-width: none !important;
+/* ---- View shell ---- */
+
+.lc-view-root {
+	padding: var(--lc-space-4);
+	max-width: 900px;
+	margin: 0 auto;
+}
+
+.lc-tab-row {
+	display: flex;
+	gap: 6px;
+	margin-bottom: var(--lc-space-4);
+	border-bottom: 1px solid var(--background-modifier-border);
+	padding-bottom: var(--lc-space-3);
+}
+
+.lc-tab-btn {
+	font-size: 0.9em;
+	font-weight: 600;
+	padding: 6px 14px;
+	cursor: pointer;
+	background: transparent;
+	border: none;
+	border-radius: var(--lc-radius-md);
+	color: var(--text-muted);
+	box-shadow: none;
+	transition: background-color 0.12s ease, color 0.12s ease;
+}
+
+.lc-tab-btn:hover {
+	background-color: var(--background-modifier-hover);
+	color: var(--text-normal);
+}
+
+.lc-tab-btn-active,
+.lc-tab-btn-active:hover {
+	background-color: var(--interactive-accent);
+	color: var(--text-on-accent);
+}
+
+.lc-add-btn {
+	display: block;
+	margin-bottom: var(--lc-space-4);
+	padding: 8px 16px;
+	border: 1.5px dashed var(--background-modifier-border);
+	border-radius: var(--lc-radius-lg);
+	background: transparent;
+	color: var(--text-muted);
+	cursor: pointer;
+	font-weight: 600;
+	box-shadow: none;
+	transition: border-color 0.12s ease, color 0.12s ease, background-color 0.12s ease;
+}
+
+.lc-add-btn:hover {
+	border-color: var(--interactive-accent);
+	color: var(--interactive-accent);
+	background-color: var(--background-modifier-hover);
+}
+
+.lc-icon-btn {
+	display: inline-flex;
+	align-items: center;
+	justify-content: center;
+	padding: 4px 8px;
+	border: none;
+	border-radius: var(--lc-radius-md);
+	background: transparent;
+	box-shadow: none;
+	cursor: pointer;
+	opacity: 0.7;
+	transition: opacity 0.12s ease, background-color 0.12s ease;
+}
+
+.lc-icon-btn:hover {
+	opacity: 1;
+	background-color: var(--background-modifier-hover);
+}
+
+.lc-field-label {
+	font-size: 0.75em;
+	font-weight: 700;
+	text-transform: uppercase;
+	letter-spacing: 0.03em;
+	color: var(--text-faint);
+	margin-bottom: 4px;
+}
+
+.lc-textarea,
+.lc-inline-input {
+	width: 100%;
+	font-family: inherit;
+	font-size: 0.9em;
+	padding: 6px 10px;
+	border-radius: var(--lc-radius-md);
+	border: 1px solid var(--background-modifier-border);
+	background-color: var(--background-primary);
+	color: var(--text-normal);
+}
+
+.lc-textarea {
+	resize: vertical;
+	line-height: 1.4;
+	margin-bottom: var(--lc-space-3);
 }
 
 /* ---- Wheel of Life ---- */
-
-.lc-wheel-root {
-	margin: 1em calc(-1 * var(--file-margins, 0px));
-	padding: 0 12px;
-}
 
 .lc-wheel-chart {
 	display: block;
@@ -115,22 +209,13 @@ body.theme-dark {
 	font-weight: 700;
 }
 
-.lc-wheel-row-prose {
+.lc-wheel-row-prose-input {
+	margin-bottom: 0;
 	font-size: 0.85em;
-	color: var(--text-muted);
-	line-height: 1.4;
-}
-
-.lc-wheel-row-prose-empty {
-	font-style: italic;
+	color: var(--text-normal);
 }
 
 /* ---- Outcome cards ---- */
-
-.lc-outcomes-root {
-	margin: 1em calc(-1 * var(--file-margins, 0px));
-	padding: 0 12px;
-}
 
 .lc-outcomes-empty {
 	color: var(--text-muted);
@@ -146,12 +231,12 @@ body.theme-dark {
 }
 
 .lc-outcome-card {
+	position: relative;
 	padding: var(--lc-space-3) var(--lc-space-4);
 	border: 1px solid var(--background-modifier-border);
 	border-left: 4px solid var(--lc-outcome-color, var(--interactive-accent));
 	border-radius: var(--lc-radius-xl);
 	background-color: var(--background-primary-alt, var(--background-secondary));
-	cursor: pointer;
 	transition: box-shadow 0.15s ease;
 }
 
@@ -269,6 +354,198 @@ body.theme-dark {
 	font-style: italic;
 }
 
+.lc-outcome-actions {
+	position: absolute;
+	top: 10px;
+	right: 10px;
+	display: flex;
+	gap: 2px;
+}
+
+/* ---- Quarter tab ---- */
+
+.lc-quarter-header {
+	display: flex;
+	align-items: center;
+	gap: 10px;
+	margin-bottom: 6px;
+}
+
+.lc-quarter-id {
+	font-weight: 700;
+	font-size: 1.15em;
+}
+
+.lc-quarter-section {
+	margin-top: var(--lc-space-4);
+	padding-top: var(--lc-space-3);
+	border-top: 1px solid var(--background-modifier-border);
+}
+
+.lc-quarter-section h4 {
+	margin: 0 0 var(--lc-space-2);
+	font-size: 0.85em;
+	text-transform: uppercase;
+	letter-spacing: 0.03em;
+	color: var(--text-muted);
+}
+
+.lc-milestone-group {
+	margin-bottom: var(--lc-space-3);
+	padding: var(--lc-space-2) var(--lc-space-3);
+	border-radius: var(--lc-radius-md);
+	background-color: var(--background-secondary);
+}
+
+.lc-milestone-group-header {
+	display: flex;
+	align-items: baseline;
+	gap: 4px;
+	margin-bottom: 4px;
+}
+
+.lc-milestone-month {
+	font-weight: 700;
+}
+
+.lc-milestone-title {
+	color: var(--text-muted);
+}
+
+.lc-milestone-remove {
+	margin-left: auto;
+	background: transparent;
+	border: none;
+	box-shadow: none;
+	color: var(--text-faint);
+	cursor: pointer;
+	font-size: 1.1em;
+	line-height: 1;
+	padding: 0 4px;
+}
+
+.lc-milestone-remove:hover {
+	color: var(--text-error, red);
+}
+
+.lc-milestone-item {
+	display: flex;
+	align-items: center;
+	gap: 8px;
+	padding: 3px 0;
+}
+
+.lc-milestone-checkbox {
+	cursor: pointer;
+	accent-color: var(--interactive-accent);
+	flex-shrink: 0;
+}
+
+.lc-milestone-item-text {
+	flex-grow: 1;
+	font-size: 0.9em;
+}
+
+.lc-milestone-item-done {
+	text-decoration: line-through;
+	color: var(--text-faint);
+}
+
+.lc-milestone-add-row,
+.lc-milestone-add-group {
+	display: flex;
+	gap: 6px;
+	margin-top: 6px;
+	align-items: center;
+}
+
+.lc-milestone-add-group {
+	margin-top: var(--lc-space-3);
+}
+
+/* ---- Check-ins ---- */
+
+.lc-checkin-form {
+	display: flex;
+	flex-wrap: wrap;
+	gap: var(--lc-space-3);
+	align-items: flex-end;
+	margin-bottom: var(--lc-space-3);
+}
+
+.lc-checkin-field-row {
+	display: flex;
+	flex-direction: column;
+	gap: 3px;
+	font-size: 0.85em;
+}
+
+.lc-checkin-field-label {
+	color: var(--text-muted);
+	font-size: 0.8em;
+}
+
+.lc-checkin-field-row .lc-inline-input {
+	width: 120px;
+}
+
+.lc-checkin-history {
+	display: flex;
+	flex-direction: column;
+	gap: 2px;
+	max-height: 260px;
+	overflow-y: auto;
+}
+
+.lc-checkin-history-row {
+	display: flex;
+	gap: var(--lc-space-3);
+	padding: 4px 0;
+	font-size: 0.82em;
+	border-bottom: 1px solid var(--background-modifier-border);
+}
+
+.lc-checkin-history-date {
+	font-weight: 600;
+	flex-shrink: 0;
+	width: 90px;
+}
+
+.lc-checkin-history-values {
+	color: var(--text-muted);
+}
+
+.lc-checkin-field-builder-row {
+	display: flex;
+	gap: 6px;
+	align-items: center;
+	margin-bottom: 6px;
+}
+
+.lc-checkin-field-builder-row .lc-inline-input {
+	flex-grow: 1;
+}
+
+.lc-quarter-past-card {
+	padding: var(--lc-space-2) var(--lc-space-3);
+	border-radius: var(--lc-radius-md);
+	background-color: var(--background-secondary);
+	margin-bottom: var(--lc-space-2);
+}
+
+/* ---- Modals ---- */
+
+.lc-modal h3 {
+	margin-top: 0;
+}
+
+.lc-modal-footer {
+	display: flex;
+	justify-content: flex-end;
+	gap: 8px;
+	margin-top: var(--lc-space-4);
+}
+
 @media (max-width: 480px) {
 	.lc-outcomes-grid {
 		grid-template-columns: 1fr;
@@ -277,5 +554,10 @@ body.theme-dark {
 	.lc-rating-btn {
 		width: 30px;
 		height: 30px;
+	}
+
+	.lc-checkin-form {
+		flex-direction: column;
+		align-items: stretch;
 	}
 }
