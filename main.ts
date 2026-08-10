@@ -753,14 +753,16 @@ class LifeCompassView extends ItemView {
 			const current = this.plugin.data.vision[cat.key]?.rating ?? 0;
 			const buttons: HTMLButtonElement[] = [];
 			for (let n = 1; n <= 10; n++) {
-				const btn = ratingRow.createEl("button", { text: "" + n, cls: "lc-rating-btn" + (n <= current ? " lc-rating-btn-filled" : "") });
+				const btn = ratingRow.createEl("button", { text: "" + n, cls: "lc-rating-btn" + (n === current ? " lc-rating-btn-filled" : "") });
 				btn.type = "button";
 				btn.setAttr("aria-label", `Rate ${cat.label} ${n} out of 10`);
 				buttons.push(btn);
 				btn.onclick = async () => {
-					this.plugin.data.vision[cat.key].rating = n;
+					const wasSelected = this.plugin.data.vision[cat.key].rating === n;
+					const next = wasSelected ? 0 : n;
+					this.plugin.data.vision[cat.key].rating = next;
 					await this.plugin.persist();
-					buttons.forEach((b, i) => b.toggleClass("lc-rating-btn-filled", i + 1 <= n));
+					buttons.forEach((b, i) => b.toggleClass("lc-rating-btn-filled", i + 1 === next));
 					redrawChart();
 				};
 			}
@@ -784,7 +786,9 @@ class LifeCompassView extends ItemView {
 		const n = WHEEL_CATEGORIES.length;
 		const svgNs = "http://www.w3.org/2000/svg";
 		const svg = document.createElementNS(svgNs, "svg") as unknown as SVGSVGElement;
-		svg.setAttribute("viewBox", `0 0 ${size} ${size}`);
+		// Extra horizontal room so axis labels like "Personal Growth" don't clip against the viewBox edge.
+		const hPad = 55;
+		svg.setAttribute("viewBox", `${-hPad} 0 ${size + hPad * 2} ${size}`);
 		svg.addClass("lc-wheel-chart");
 
 		const angleFor = (i: number) => (Math.PI * 2 * i) / n - Math.PI / 2;
