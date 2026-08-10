@@ -533,6 +533,33 @@ body.theme-dark {
 	margin-bottom: var(--lc-space-2);
 }
 
+/* ---- Daily Note embed ---- */
+
+.lc-daily-root {
+	margin: 1em calc(-1 * var(--file-margins, 0px));
+	padding: var(--lc-space-3) 12px;
+	border: 1px solid var(--background-modifier-border);
+	border-radius: var(--lc-radius-lg);
+	background-color: var(--background-primary-alt, var(--background-secondary));
+}
+
+.lc-daily-header {
+	display: flex;
+	align-items: center;
+	gap: 10px;
+	margin-bottom: 6px;
+}
+
+.lc-daily-quarter-id {
+	font-weight: 700;
+}
+
+.lc-daily-priority {
+	font-size: 0.88em;
+	color: var(--text-muted);
+	margin-bottom: var(--lc-space-3);
+}
+
 /* ---- Modals ---- */
 
 .lc-modal h3 {

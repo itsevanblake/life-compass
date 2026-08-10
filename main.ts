@@ -1,4 +1,16 @@
-import { Plugin, PluginSettingTab, ItemView, WorkspaceLeaf, Modal, App, Setting, Notice, TFile, TFolder } from "obsidian";
+import {
+	Plugin,
+	PluginSettingTab,
+	ItemView,
+	WorkspaceLeaf,
+	Modal,
+	MarkdownRenderChild,
+	App,
+	Setting,
+	Notice,
+	TFile,
+	TFolder,
+} from "obsidian";
 import { createClient, SupabaseClient, Session, RealtimeChannel } from "@supabase/supabase-js";
 
 // The seven Wheel of Life categories.
@@ -1280,6 +1292,80 @@ class QuarterFormModal extends Modal {
 	}
 }
 
+// ---- Daily Note embed: a compact, daily-actionable slice of the current
+// quarter (Priority reminder + today's check-in), not the full view — the
+// Vision wheel and Outcome cards are periodic-review material, not
+// something that belongs repeating on every Daily Note. ----
+
+class DailyQuarterBlock extends MarkdownRenderChild {
+	plugin: LifeCompassPlugin;
+
+	constructor(containerEl: HTMLElement, plugin: LifeCompassPlugin) {
+		super(containerEl);
+		this.plugin = plugin;
+	}
+
+	onload() {
+		this.plugin.registerDailyBlock(this);
+		this.render();
+	}
+
+	onunload() {
+		this.plugin.unregisterDailyBlock(this);
+	}
+
+	render() {
+		const el = this.containerEl;
+		el.empty();
+		el.addClass("lc-daily-root");
+
+		const current = this.plugin.data.quarters.find((q) => q.id === this.plugin.data.currentQuarterId);
+		if (!current) {
+			el.createDiv({ text: "No active quarter — open Life Compass to start one.", cls: "lc-outcomes-empty" });
+			return;
+		}
+
+		const header = el.createDiv({ cls: "lc-daily-header" });
+		header.createDiv({ text: `🎯 ${current.id}`, cls: "lc-daily-quarter-id" });
+		if (current.deadline) header.createSpan({ text: daysUntil(current.deadline), cls: "lc-outcome-deadline" });
+
+		if (current.priority) {
+			el.createDiv({ text: current.priority, cls: "lc-daily-priority" });
+		}
+
+		if (current.checkinFields.length === 0) {
+			el.createDiv({ text: "No check-in fields defined for this quarter yet.", cls: "lc-outcomes-empty" });
+			return;
+		}
+
+		const today = todayStr();
+		const todayValues = current.checkins[today] ?? {};
+		const form = el.createDiv({ cls: "lc-checkin-form" });
+		const inputs: Record<string, HTMLInputElement> = {};
+		for (const field of current.checkinFields) {
+			const row = form.createDiv({ cls: "lc-checkin-field-row" });
+			row.createSpan({ text: field.label, cls: "lc-checkin-field-label" });
+			const input = row.createEl("input", { cls: "lc-inline-input" });
+			input.type = field.type === "number" ? "number" : "text";
+			input.value = todayValues[field.key] !== undefined ? "" + todayValues[field.key] : "";
+			inputs[field.key] = input;
+		}
+		const saveBtn = form.createEl("button", { text: "Save today", cls: "mod-cta" });
+		saveBtn.type = "button";
+		saveBtn.onclick = async () => {
+			const entry: Record<string, string | number> = {};
+			for (const field of current.checkinFields) {
+				const raw = inputs[field.key].value;
+				entry[field.key] = field.type === "number" ? Number(raw) || 0 : raw;
+			}
+			current.checkins[today] = entry;
+			await this.plugin.persist();
+			new Notice("Check-in saved.");
+			this.plugin.refreshViews();
+		};
+	}
+}
+
 // ---- Sync plumbing (mirrors habit-tracker's Supabase architecture) ----
 
 const SYNC_TABLE = "life_compass_data";
@@ -1317,6 +1403,7 @@ export default class LifeCompassPlugin extends Plugin {
 	session: Session | null = null;
 	private realtimeChannel: RealtimeChannel | null = null;
 	private initializedCredsKey = "";
+	private dailyBlocks: Set<DailyQuarterBlock> = new Set();
 
 	async onload() {
 		const saved = await this.loadData();
@@ -1337,6 +1424,10 @@ export default class LifeCompassPlugin extends Plugin {
 			id: "import-goals-notes",
 			name: "Import from Goals/ notes and clean up",
 			callback: () => this.runMigration(),
+		});
+		this.registerMarkdownCodeBlockProcessor("life-compass-daily", (_source, el, ctx) => {
+			const block = new DailyQuarterBlock(el, this);
+			ctx.addChild(block);
 		});
 
 		if (this.settings.supabaseUrl && this.settings.supabaseAnonKey) {
@@ -1515,5 +1606,14 @@ export default class LifeCompassPlugin extends Plugin {
 		this.app.workspace.getLeavesOfType(VIEW_TYPE).forEach((leaf) => {
 			if (leaf.view instanceof LifeCompassView) leaf.view.render();
 		});
+		for (const block of this.dailyBlocks) block.render();
+	}
+
+	registerDailyBlock(block: DailyQuarterBlock) {
+		this.dailyBlocks.add(block);
+	}
+
+	unregisterDailyBlock(block: DailyQuarterBlock) {
+		this.dailyBlocks.delete(block);
 	}
 }
