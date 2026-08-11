@@ -427,6 +427,12 @@ body.theme-dark {
 	margin-bottom: 6px;
 }
 
+.lc-outcome-start-date {
+	font-size: 0.8em;
+	color: var(--text-muted);
+	margin-bottom: 2px;
+}
+
 .lc-outcome-deadline {
 	font-size: 0.8em;
 	color: var(--text-muted);

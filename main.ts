@@ -67,6 +67,7 @@ interface Outcome {
 	id: string;
 	name: string;
 	visionCategory: string; // key into PluginData.categories
+	startDate?: string; // YYYY-MM-DD
 	deadline: string; // YYYY-MM-DD
 	status: GoalStatus;
 	successMetric: string;
@@ -1570,7 +1571,14 @@ class LifeCompassView extends ItemView {
 		}
 
 		if (outcome.successMetric) card.createDiv({ text: outcome.successMetric, cls: "lc-outcome-metric" });
-		if (outcome.deadline) card.createDiv({ text: daysUntil(outcome.deadline), cls: "lc-outcome-deadline" });
+		if (outcome.startDate) {
+			const d = new Date(outcome.startDate);
+			const formatted = Number.isNaN(d.getTime())
+				? outcome.startDate
+				: d.toLocaleDateString("default", { month: "short", day: "numeric", year: "numeric" });
+			card.createDiv({ text: `Started: ${formatted}`, cls: "lc-outcome-start-date" });
+		}
+		if (outcome.deadline) card.createDiv({ text: `Achieve by: ${daysUntil(outcome.deadline)}`, cls: "lc-outcome-deadline" });
 		if (outcome.why) card.createDiv({ text: `Why: ${outcome.why}`, cls: "lc-outcome-why" });
 		if (outcome.baseline) card.createDiv({ text: `Baseline: ${outcome.baseline}`, cls: "lc-outcome-obstacles" });
 		if (outcome.obstacles) card.createDiv({ text: `Obstacles: ${outcome.obstacles}`, cls: "lc-outcome-obstacles" });
@@ -2104,6 +2112,7 @@ class OutcomeFormModal extends Modal {
 	values: {
 		name: string;
 		visionCategory: string;
+		startDate: string;
 		deadline: string;
 		status: GoalStatus;
 		successMetric: string;
@@ -2126,6 +2135,7 @@ class OutcomeFormModal extends Modal {
 			? {
 					name: existing.name,
 					visionCategory: existing.visionCategory,
+					startDate: existing.startDate ?? "",
 					deadline: existing.deadline,
 					status: existing.status,
 					successMetric: existing.successMetric,
@@ -2137,6 +2147,7 @@ class OutcomeFormModal extends Modal {
 			: {
 					name: "",
 					visionCategory: plugin.data.categories[0]?.key ?? "",
+					startDate: "",
 					deadline: "",
 					status: "active",
 					successMetric: "",
@@ -2166,7 +2177,11 @@ class OutcomeFormModal extends Modal {
 			});
 		});
 		renderPurposeRef();
-		new Setting(contentEl).setName("Deadline").addText((t) => {
+		new Setting(contentEl).setName("Goal Start").addText((t) => {
+			t.inputEl.type = "date";
+			t.setValue(this.values.startDate).onChange((v) => (this.values.startDate = v));
+		});
+		new Setting(contentEl).setName("Achieve Goal By").addText((t) => {
 			t.inputEl.type = "date";
 			t.setValue(this.values.deadline).onChange((v) => (this.values.deadline = v));
 		});
@@ -2255,6 +2270,7 @@ class OutcomeFormModal extends Modal {
 			if (this.existing) {
 				this.existing.name = this.values.name.trim();
 				this.existing.visionCategory = this.values.visionCategory;
+				this.existing.startDate = this.values.startDate || undefined;
 				this.existing.deadline = this.values.deadline;
 				this.existing.status = this.values.status;
 				this.existing.successMetric = this.values.successMetric;
@@ -2271,6 +2287,7 @@ class OutcomeFormModal extends Modal {
 					id,
 					name: this.values.name.trim(),
 					visionCategory: this.values.visionCategory,
+					startDate: this.values.startDate || undefined,
 					deadline: this.values.deadline,
 					status: this.values.status,
 					successMetric: this.values.successMetric,
