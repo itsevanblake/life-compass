@@ -76,7 +76,7 @@ interface Outcome {
 	obstacles?: string;
 	progress: number; // 0-100, manually set
 	linkedHabitIds: string[]; // explicit links to habit-tracker habit IDs, picked in the edit modal
-	archived?: boolean; // hidden from the main Outcomes grid/Overview, kept (not deleted) under "Archived Outcomes"
+	archived?: boolean; // hidden from the main Outcomes grid/Overview, kept (not deleted) under "Archived Goals" (UI label — this type/field stays "Outcome" internally)
 	createdAt: string;
 	updatedAt: string;
 }
@@ -614,7 +614,7 @@ async function importFromGoalsNotes(app: App, existingVision: Record<string, Vis
 		const outcomeName = wikilinkTarget(fm.Outcome);
 		const matchedOutcomeId = outcomeName ? outcomeNameToId.get(outcomeName) : undefined;
 		if (outcomeName && !matchedOutcomeId) {
-			warnings.push(`"${file.basename}": Outcome link "${outcomeName}" didn't match any imported outcome — defaulted to "${outcomes[0]?.name ?? "(none)"}", check it.`);
+			warnings.push(`"${file.basename}": Goal link "${outcomeName}" didn't match any imported goal — defaulted to "${outcomes[0]?.name ?? "(none)"}", check it.`);
 		}
 		const outcomeId = matchedOutcomeId ?? outcomes[0]?.id ?? "";
 
@@ -763,7 +763,7 @@ class LifeCompassSettingTab extends PluginSettingTab {
 		containerEl.empty();
 		containerEl.createEl("h2", { text: "Life Compass — Sync" });
 		containerEl.createEl("p", {
-			text: "Connect a free Supabase project to sync your Vision, Outcomes, and Quarter across devices in real time. Leave blank to use this device only.",
+			text: "Connect a free Supabase project to sync your Vision, Goals, and Quarter across devices in real time. Leave blank to use this device only.",
 			cls: "setting-item-description",
 		});
 
@@ -853,7 +853,7 @@ class LifeCompassSettingTab extends PluginSettingTab {
 
 		containerEl.createEl("h3", { text: "Backup" });
 		containerEl.createEl("p", {
-			text: "Now that Vision/Outcomes/Quarters aren't stored as notes, the only durable copy besides Supabase is this device's local plugin data. Export a snapshot into the vault (backed up the same way the rest of your notes are) as a safety net.",
+			text: "Now that Vision/Goals/Quarters aren't stored as notes, the only durable copy besides Supabase is this device's local plugin data. Export a snapshot into the vault (backed up the same way the rest of your notes are) as a safety net.",
 			cls: "setting-item-description",
 		});
 		new Setting(containerEl).addButton((btn) =>
@@ -892,7 +892,7 @@ const WALKTHROUGH_STEPS: WalkthroughStep[] = [
 	{
 		tab: "overview",
 		title: "Welcome to Life Compass",
-		body: "This is built around RPM: Vision (your Purpose) → Outcomes (the Results you're after) → Quarter (the Massive Action Plan that actually gets you there). This tour walks through each in order — Skip any time.",
+		body: "This is built around RPM: Vision (your Purpose) → Goals (the Results you're after) → Quarter (the Massive Action Plan that actually gets you there). This tour walks through each in order — Skip any time.",
 		targetSelector: ".lc-tab-row",
 	},
 	{
@@ -903,8 +903,8 @@ const WALKTHROUGH_STEPS: WalkthroughStep[] = [
 	},
 	{
 		tab: "outcomes",
-		title: "Turn Vision into Outcomes",
-		body: "An Outcome ladders up to one Vision category — a concrete Result with a Success Metric and a deadline. It can't go Active until it's linked to at least one Habit Tracker habit — that's the System that actually drives it.",
+		title: "Turn Vision into Goals",
+		body: "A Goal ladders up to one Vision category — a concrete Result with a Success Metric and a deadline. It can't go Active until it's linked to at least one Habit Tracker habit — that's the System that actually drives it.",
 		targetSelector: ".lc-add-btn",
 	},
 	{
@@ -959,7 +959,7 @@ class LifeCompassView extends ItemView {
 		const tabs: { id: Tab; label: string }[] = [
 			{ id: "overview", label: "🏠 Overview" },
 			{ id: "vision", label: "🎯 Vision" },
-			{ id: "outcomes", label: "🚀 Outcomes" },
+			{ id: "outcomes", label: "🚀 Goals" },
 			{ id: "quarter", label: "📅 Quarter" },
 			{ id: "trends", label: "📈 Trends" },
 		];
@@ -1127,7 +1127,7 @@ class LifeCompassView extends ItemView {
 			this.activeTab = "outcomes";
 			this.render();
 		});
-		outcomesCard.createDiv({ text: "🚀 Outcomes", cls: "lc-field-label" });
+		outcomesCard.createDiv({ text: "🚀 Goals", cls: "lc-field-label" });
 		const active = outcomes.filter((o) => o.status === "active").length;
 		const done = outcomes.filter((o) => o.status === "done").length;
 		outcomesCard.createDiv({ text: `${active} active, ${done} done, ${outcomes.length} total`, cls: "lc-outcome-metric" });
@@ -1217,7 +1217,7 @@ class LifeCompassView extends ItemView {
 				removeBtn.onclick = () => {
 					const linked = this.plugin.data.outcomes.filter((o) => !o.archived && o.visionCategory === cat.key);
 					if (linked.length) {
-						new Notice(`Can't remove "${cat.label}" — still linked from: ${linked.map((o) => o.name).join(", ")}. Reassign or archive those Outcomes first.`);
+						new Notice(`Can't remove "${cat.label}" — still linked from: ${linked.map((o) => o.name).join(", ")}. Reassign or archive those Goals first.`);
 						return;
 					}
 					new ConfirmDeleteModal(this.plugin.app, cat.label, async () => {
@@ -1414,12 +1414,12 @@ class LifeCompassView extends ItemView {
 			body.appendChild(this.buildLineChart(series, 0, 10));
 		}
 
-		body.createEl("h3", { text: "🚀 Outcome progress over time" });
+		body.createEl("h3", { text: "🚀 Goal progress over time" });
 		const activeOutcomes = this.plugin.data.outcomes.filter((o) => !o.archived);
 		const outcomesWithHistory = activeOutcomes.filter((o) => this.plugin.data.progressHistory.some((e) => e.outcomeId === o.id));
 		if (outcomesWithHistory.length === 0) {
 			body.createDiv({
-				text: "Once you update an Outcome's progress a few times, its trend line will show up here.",
+				text: "Once you update a Goal's progress a few times, its trend line will show up here.",
 				cls: "lc-outcomes-empty",
 			});
 		} else {
@@ -1518,12 +1518,12 @@ class LifeCompassView extends ItemView {
 	renderOutcomes(body: HTMLElement) {
 		body.addClass("lc-outcomes-root");
 
-		const addBtn = body.createEl("button", { text: "+ Add Outcome", cls: "lc-add-btn" });
+		const addBtn = body.createEl("button", { text: "+ Add Goal", cls: "lc-add-btn" });
 		addBtn.type = "button";
 		addBtn.onclick = () => new OutcomeFormModal(this.plugin, null, () => this.render()).open();
 
 		if (this.plugin.data.outcomes.length === 0) {
-			body.createDiv({ text: "No outcomes yet — add your first one above.", cls: "lc-outcomes-empty" });
+			body.createDiv({ text: "No goals yet — add your first one above.", cls: "lc-outcomes-empty" });
 			return;
 		}
 
@@ -1532,7 +1532,7 @@ class LifeCompassView extends ItemView {
 		const archived = this.plugin.data.outcomes.filter((o) => o.archived);
 
 		if (active.length === 0) {
-			body.createDiv({ text: "No active outcomes — add one above, or restore one from Archived Outcomes below.", cls: "lc-outcomes-empty" });
+			body.createDiv({ text: "No active goals — add one above, or restore one from Archived Goals below.", cls: "lc-outcomes-empty" });
 		} else {
 			const grid = body.createDiv({ cls: "lc-outcomes-grid" });
 			for (const outcome of active) this.renderOutcomeCard(grid, outcome, habits, false);
@@ -1540,12 +1540,12 @@ class LifeCompassView extends ItemView {
 
 		if (archived.length) {
 			const section = body.createDiv({ cls: "lc-quarter-section" });
-			const toggle = section.createEl("h4", { text: `▸ Archived Outcomes (${archived.length})`, cls: "lc-collapsible-toggle" });
+			const toggle = section.createEl("h4", { text: `▸ Archived Goals (${archived.length})`, cls: "lc-collapsible-toggle" });
 			const list = section.createDiv({ cls: "lc-collapsible-body lc-outcomes-grid" });
 			toggle.onclick = () => {
 				const nowOpen = !list.hasClass("lc-collapsible-body-open");
 				list.toggleClass("lc-collapsible-body-open", nowOpen);
-				toggle.setText(`${nowOpen ? "▾" : "▸"} Archived Outcomes (${archived.length})`);
+				toggle.setText(`${nowOpen ? "▾" : "▸"} Archived Goals (${archived.length})`);
 			};
 			for (const outcome of archived) this.renderOutcomeCard(list, outcome, habits, true);
 		}
@@ -1615,7 +1615,7 @@ class LifeCompassView extends ItemView {
 		if (archived) {
 			const restoreBtn = actions.createEl("button", { text: "↩️", cls: "lc-icon-btn" });
 			restoreBtn.type = "button";
-			restoreBtn.setAttr("aria-label", "Restore outcome");
+			restoreBtn.setAttr("aria-label", "Restore goal");
 			restoreBtn.onclick = async (e) => {
 				e.stopPropagation();
 				outcome.archived = false;
@@ -1626,7 +1626,7 @@ class LifeCompassView extends ItemView {
 		} else {
 			const archiveBtn = actions.createEl("button", { text: "📦", cls: "lc-icon-btn" });
 			archiveBtn.type = "button";
-			archiveBtn.setAttr("aria-label", "Archive outcome");
+			archiveBtn.setAttr("aria-label", "Archive goal");
 			archiveBtn.onclick = async (e) => {
 				e.stopPropagation();
 				outcome.archived = true;
@@ -1637,14 +1637,14 @@ class LifeCompassView extends ItemView {
 		}
 		const editBtn = actions.createEl("button", { text: "✏️", cls: "lc-icon-btn" });
 		editBtn.type = "button";
-		editBtn.setAttr("aria-label", "Edit outcome");
+		editBtn.setAttr("aria-label", "Edit goal");
 		editBtn.onclick = (e) => {
 			e.stopPropagation();
 			new OutcomeFormModal(this.plugin, outcome, () => this.render()).open();
 		};
 		const delBtn = actions.createEl("button", { text: "🗑", cls: "lc-icon-btn" });
 		delBtn.type = "button";
-		delBtn.setAttr("aria-label", "Delete outcome");
+		delBtn.setAttr("aria-label", "Delete goal");
 		delBtn.onclick = (e) => {
 			e.stopPropagation();
 			new ConfirmDeleteModal(this.plugin.app, outcome.name, async () => {
@@ -2161,7 +2161,7 @@ class OutcomeFormModal extends Modal {
 	onOpen() {
 		const { contentEl } = this;
 		contentEl.addClass("lc-modal");
-		contentEl.createEl("h3", { text: this.existing ? "Edit Outcome" : "New Outcome" });
+		contentEl.createEl("h3", { text: this.existing ? "Edit Goal" : "New Goal" });
 
 		new Setting(contentEl).setName("Name").addText((t) => t.setValue(this.values.name).onChange((v) => (this.values.name = v)));
 		const purposeRefEl = contentEl.createDiv({ cls: "setting-item-description lc-outcome-purpose-ref" });
@@ -2196,7 +2196,7 @@ class OutcomeFormModal extends Modal {
 			.addTextArea((t) => t.setValue(this.values.successMetric).onChange((v) => (this.values.successMetric = v)));
 		new Setting(contentEl)
 			.setName("Why")
-			.setDesc("Why this specific Outcome matters — ideally it traces back to the category's Purpose above.")
+			.setDesc("Why this specific Goal matters — ideally it traces back to the category's Purpose above.")
 			.addTextArea((t) => t.setValue(this.values.why).onChange((v) => (this.values.why = v)));
 		new Setting(contentEl)
 			.setName("Baseline (optional)")
@@ -2227,7 +2227,7 @@ class OutcomeFormModal extends Modal {
 			contentEl.createEl("p", { text: "No habits yet in Habit Tracker.", cls: "setting-item-description" });
 		} else {
 			contentEl.createEl("p", {
-				text: "Who do you need to become to hit this? This is the System that actually drives the Outcome — check every habit or task that serves it.",
+				text: "Who do you need to become to hit this? This is the System that actually drives the Goal — check every habit or task that serves it.",
 				cls: "setting-item-description",
 			});
 			const list = contentEl.createDiv({ cls: "lc-habit-picker" });
@@ -2263,7 +2263,7 @@ class OutcomeFormModal extends Modal {
 			// You fall to the level of your systems — an Outcome can't go
 			// Active without at least one habit or task actually driving it.
 			if (this.values.status === "active" && this.linkedHabitIdsDraft.length === 0) {
-				new Notice("Link at least one habit or task before marking this Outcome Active — that's the System that actually drives it.");
+				new Notice("Link at least one habit or task before marking this Goal Active — that's the System that actually drives it.");
 				return;
 			}
 			const now = todayStr();
@@ -2359,21 +2359,21 @@ class QuarterFormModal extends Modal {
 		contentEl.addClass("lc-modal");
 		contentEl.createEl("h3", { text: this.existing ? "Edit Quarter" : "New Quarter" });
 
-		// A brand-new custom quarter needs an Outcome to ladder up to, but an
+		// A brand-new custom quarter needs a Goal to ladder up to, but an
 		// already-existing (e.g. auto-generated) quarter should stay
-		// editable — Priority/Why/dates — even before any Outcome exists.
+		// editable — Priority/Why/dates — even before any Goal exists.
 		if (!this.existing && this.plugin.data.outcomes.length === 0) {
-			contentEl.createEl("p", { text: "Add an Outcome first — a Quarter needs something to ladder up to." });
+			contentEl.createEl("p", { text: "Add a Goal first — a Quarter needs something to ladder up to." });
 			return;
 		}
 
 		if (this.plugin.data.outcomes.length === 0) {
 			contentEl.createEl("p", {
-				text: "No Outcomes yet — add one to link this quarter to what it's actually laddering up to.",
+				text: "No Goals yet — add one to link this quarter to what it's actually laddering up to.",
 				cls: "setting-item-description",
 			});
 		} else {
-			new Setting(contentEl).setName("Outcome").addDropdown((dd) => {
+			new Setting(contentEl).setName("Goal").addDropdown((dd) => {
 				this.plugin.data.outcomes.forEach((o) => dd.addOption(o.id, o.name));
 				dd.setValue(this.values.outcomeId).onChange((v) => (this.values.outcomeId = v));
 			});
