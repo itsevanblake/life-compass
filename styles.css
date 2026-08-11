@@ -348,6 +348,16 @@ body.theme-dark {
 	flex-shrink: 0;
 }
 
+.lc-outcome-habit-task-badge {
+	font-size: 0.7em;
+	font-weight: 700;
+	letter-spacing: 0.03em;
+	color: var(--text-muted);
+	border: 1px solid var(--background-modifier-border);
+	border-radius: var(--lc-radius-sm, 4px);
+	padding: 1px 5px;
+}
+
 .lc-habit-picker {
 	display: flex;
 	flex-direction: column;
@@ -756,6 +766,164 @@ body.theme-dark {
 	justify-content: flex-end;
 	gap: 8px;
 	margin-top: var(--lc-space-4);
+}
+
+.lc-digest-habit-list {
+	display: flex;
+	flex-direction: column;
+	gap: 2px;
+}
+
+.lc-digest-habit-list .lc-outcome-habit-row {
+	font-size: 0.9em;
+}
+
+/* ---- Vision "still needs writing" nudge (Overview + Vision tab) ---- */
+
+.lc-vision-nudge {
+	border-left: 4px solid #eab308;
+}
+
+.lc-vision-nudge-chips {
+	display: flex;
+	flex-wrap: wrap;
+	gap: 6px;
+	margin-top: 8px;
+}
+
+.lc-vision-nudge-chip {
+	font-size: 0.8em;
+	padding: 3px 10px;
+	border-radius: 999px;
+	border: 1px solid color-mix(in srgb, #eab308 55%, var(--background-modifier-border));
+	background-color: color-mix(in srgb, #eab308 12%, var(--background-primary));
+	color: var(--text-normal);
+	cursor: pointer;
+}
+
+.lc-vision-nudge-chip:hover {
+	background-color: color-mix(in srgb, #eab308 22%, var(--background-primary));
+}
+
+.lc-field-label-row {
+	display: flex;
+	align-items: center;
+	gap: 8px;
+}
+
+.lc-vision-not-written-badge {
+	font-size: 0.68em;
+	font-weight: 600;
+	text-transform: none;
+	letter-spacing: normal;
+	color: color-mix(in srgb, #eab308 70%, var(--text-muted));
+}
+
+.lc-wheel-row-needs-vision {
+	border-left-style: dashed;
+}
+
+/* ---- Trends tab ---- */
+
+.lc-trends-root h3 {
+	margin-bottom: var(--lc-space-2);
+}
+
+.lc-trends-root h3:not(:first-child) {
+	margin-top: var(--lc-space-5);
+}
+
+.lc-trend-chart {
+	display: block;
+	width: 100%;
+	max-width: 720px;
+	margin-bottom: var(--lc-space-3);
+}
+
+.lc-trend-grid-line {
+	stroke: var(--background-modifier-border);
+	stroke-width: 1;
+}
+
+.lc-trend-axis-label {
+	font-size: 10px;
+	fill: var(--text-faint);
+}
+
+.lc-trend-line {
+	stroke: var(--lc-trend-color, var(--interactive-accent));
+	stroke-width: 2;
+}
+
+.lc-trend-dot {
+	fill: var(--lc-trend-color, var(--interactive-accent));
+}
+
+.lc-trend-end-label {
+	font-size: 11px;
+	font-weight: 600;
+	fill: var(--lc-trend-color, var(--interactive-accent));
+}
+
+/* ---- Momentum (Overview tab) — pride/progress register, not urgency ---- */
+
+.lc-momentum-card {
+	border-left: 4px solid #f59e0b;
+	background: linear-gradient(135deg, color-mix(in srgb, #f59e0b 8%, transparent), transparent 60%),
+		var(--background-primary-alt, var(--background-secondary));
+}
+
+.lc-momentum-line {
+	font-size: 0.88em;
+	color: var(--text-normal);
+	padding: 2px 0;
+}
+
+/* ---- Outcome obstacles ---- */
+
+.lc-outcome-obstacles {
+	font-size: 0.85em;
+	color: var(--text-muted);
+	margin-top: 4px;
+}
+
+/* ---- Daily glance: linked-habit streaks ---- */
+
+.lc-daily-streaks {
+	display: flex;
+	flex-direction: column;
+	gap: 4px;
+	margin: var(--lc-space-2) 0;
+}
+
+.lc-daily-streak-row {
+	display: flex;
+	flex-wrap: wrap;
+	align-items: center;
+	gap: 6px;
+	font-size: 0.85em;
+}
+
+.lc-daily-streak-outcome {
+	color: var(--text-muted);
+}
+
+.lc-daily-streak-chip {
+	font-size: 0.85em;
+	padding: 2px 8px;
+	border-radius: 999px;
+	background-color: color-mix(in srgb, #f59e0b 14%, var(--background-secondary));
+	color: var(--text-normal);
+}
+
+/* ---- Milestone "completed" pride treatment ---- */
+
+.lc-milestone-item-done .lc-milestone-item-text {
+	color: color-mix(in srgb, #22c55e 55%, var(--text-faint));
+}
+
+.lc-progress-bar-near-complete {
+	background: linear-gradient(90deg, var(--lc-outcome-color, var(--interactive-accent)), color-mix(in srgb, #eab308 60%, var(--lc-outcome-color, var(--interactive-accent))));
 }
 
 @media (max-width: 480px) {

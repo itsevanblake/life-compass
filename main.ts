@@ -57,7 +57,8 @@ function uniqueCategoryKey(categories: WheelCategory[], label: string): string {
 
 interface VisionCategoryData {
 	rating: number; // 0 = unrated, 1-10 otherwise
-	prose: string;
+	prose: string; // RPM Result: a vivid future-state description — as if it's already true
+	purpose?: string; // RPM Purpose: why this category matters, broad/3-10yr — distinct from any one Outcome's own Why
 }
 
 type GoalStatus = "active" | "done" | "missed";
@@ -99,7 +100,8 @@ interface CheckinField {
 interface Quarter {
 	id: string; // e.g. "2026-Q3"
 	outcomeId: string;
-	deadline: string;
+	startDate?: string; // YYYY-MM-DD — the calendar quarter's first day, for auto-generated quarters
+	deadline: string; // doubles as the calendar quarter's last day for auto-generated quarters
 	status: GoalStatus;
 	successMetric: string;
 	priority: string; // the one Wildly Important Goal
@@ -115,19 +117,42 @@ interface Quarter {
 	updatedAt: string;
 }
 
+interface RatingHistoryEntry {
+	date: string; // YYYY-MM-DD
+	categoryKey: string;
+	rating: number;
+}
+
+interface ProgressHistoryEntry {
+	date: string; // YYYY-MM-DD
+	outcomeId: string;
+	progress: number;
+}
+
 interface PluginData {
 	vision: Record<string, VisionCategoryData>;
 	categories: WheelCategory[]; // the Wheel of Life's life areas — user-editable, seeded from DEFAULT_WHEEL_CATEGORIES
 	outcomes: Outcome[];
 	quarters: Quarter[];
 	currentQuarterId: string | null;
+	ratingHistory: RatingHistoryEntry[]; // one entry per category per calendar day, for the Trends tab
+	progressHistory: ProgressHistoryEntry[]; // one entry per outcome per calendar day, for the Trends tab
 }
 
-const DEFAULT_DATA: PluginData = { vision: {}, categories: [...DEFAULT_WHEEL_CATEGORIES], outcomes: [], quarters: [], currentQuarterId: null };
+const DEFAULT_DATA: PluginData = {
+	vision: {},
+	categories: [...DEFAULT_WHEEL_CATEGORIES],
+	outcomes: [],
+	quarters: [],
+	currentQuarterId: null,
+	ratingHistory: [],
+	progressHistory: [],
+};
 
 interface PluginSettings {
 	supabaseUrl: string;
 	supabaseAnonKey: string;
+	lastDigestShownDate?: string; // YYYY-MM-DD — guards the weekly digest modal from re-showing more than once per day
 }
 
 const DEFAULT_SETTINGS: PluginSettings = { supabaseUrl: "", supabaseAnonKey: "" };
@@ -155,6 +180,115 @@ function formatDate(d: Date): string {
 	return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
 }
 
+// Calendar-quarter boundaries — Q1 Jan 1-Mar 31, Q2 Apr 1-Jun 30, Q3 Jul
+// 1-Sep 30, Q4 Oct 1-Dec 31. Using month-end dates rather than day counts
+// means leap years never need special-casing here.
+function quarterDateRange(year: number, q: 1 | 2 | 3 | 4): { start: string; end: string } {
+	const startMonth = (q - 1) * 3;
+	const start = new Date(year, startMonth, 1);
+	const end = new Date(year, startMonth + 3, 0); // day 0 of the next month = last day of this quarter
+	return { start: formatDate(start), end: formatDate(end) };
+}
+
+function quarterIdForDate(d: Date): string {
+	return `${d.getFullYear()}-Q${Math.floor(d.getMonth() / 3) + 1}`;
+}
+
+function formatQuarterRange(q: Quarter): string {
+	if (!q.startDate || !q.deadline) return "";
+	const fmt = (s: string) => {
+		const d = new Date(s);
+		return Number.isNaN(d.getTime()) ? s : d.toLocaleDateString("default", { month: "short", day: "numeric" });
+	};
+	const endYear = new Date(q.deadline).getFullYear();
+	return `${fmt(q.startDate)} – ${fmt(q.deadline)}, ${Number.isNaN(endYear) ? "" : endYear}`;
+}
+
+// Ensures all four calendar quarters of `year` exist in `data.quarters`,
+// auto-generating any that are missing with their real date ranges already
+// filled in — Outcome/Priority/Why are left blank for the user to fill in,
+// same as a manually created quarter. Returns the ids that were newly
+// added (empty if the year's quarters already existed).
+function ensureQuartersForYear(data: PluginData, year: number): string[] {
+	const added: string[] = [];
+	for (const q of [1, 2, 3, 4] as const) {
+		const id = `${year}-Q${q}`;
+		if (data.quarters.some((existing) => existing.id === id)) continue;
+		const { start, end } = quarterDateRange(year, q);
+		const now = todayStr();
+		data.quarters.push({
+			id,
+			outcomeId: "",
+			startDate: start,
+			deadline: end,
+			status: "active",
+			successMetric: "",
+			priority: "",
+			why: "",
+			milestones: [],
+			weeklyCommitments: "",
+			dailyActionsPrompt: "",
+			obstacles: "",
+			checkinFields: [],
+			checkins: {},
+			createdAt: now,
+			updatedAt: now,
+		});
+		added.push(id);
+	}
+	if (added.length) data.quarters.sort((a, b) => a.id.localeCompare(b.id));
+	return added;
+}
+
+const QUARTER_ID_PATTERN = /^\d{4}-Q[1-4]$/;
+
+// One-time, idempotent cleanup for quarters created before quarter ids were
+// locked to the YYYY-Qn format (the old free-text "Quarter ID" field let a
+// hand-typed id like "Q3" get created alongside an auto-generated "2026-Q3"
+// covering the same period). Merges the legacy quarter's real data onto the
+// matching auto-generated placeholder (or just renames it if no placeholder
+// exists yet) and fixes up currentQuarterId. Returns true if anything changed,
+// so the caller knows whether to persist immediately.
+function migrateLegacyQuarterIds(data: PluginData): boolean {
+	let changed = false;
+	for (const legacy of data.quarters.filter((q) => !QUARTER_ID_PATTERN.test(q.id))) {
+		const originalId = legacy.id;
+		const targetId = legacy.startDate ? quarterIdForDate(new Date(legacy.startDate)) : quarterIdForDate(new Date());
+		const placeholder = data.quarters.find((q) => q.id === targetId);
+		if (placeholder) {
+			Object.assign(placeholder, {
+				...legacy,
+				id: targetId,
+				startDate: placeholder.startDate,
+				deadline: placeholder.deadline,
+			});
+			data.quarters = data.quarters.filter((q) => q !== legacy);
+		} else {
+			legacy.id = targetId;
+		}
+		if (data.currentQuarterId === originalId) data.currentQuarterId = targetId;
+		changed = true;
+	}
+	return changed;
+}
+
+// One entry per category/outcome per calendar day — same-day re-clicks
+// update the existing entry in place rather than spamming a new one, so
+// the Trends tab's line charts read as a real trend, not click noise.
+function recordRatingHistory(data: PluginData, categoryKey: string, rating: number) {
+	const date = todayStr();
+	const existing = data.ratingHistory.find((e) => e.date === date && e.categoryKey === categoryKey);
+	if (existing) existing.rating = rating;
+	else data.ratingHistory.push({ date, categoryKey, rating });
+}
+
+function recordProgressHistory(data: PluginData, outcomeId: string, progress: number) {
+	const date = todayStr();
+	const existing = data.progressHistory.find((e) => e.date === date && e.outcomeId === outcomeId);
+	if (existing) existing.progress = progress;
+	else data.progressHistory.push({ date, outcomeId, progress });
+}
+
 function daysUntil(dateStr: string | undefined): string {
 	if (!dateStr) return "";
 	const deadline = new Date(dateStr);
@@ -166,6 +300,28 @@ function daysUntil(dateStr: string | undefined): string {
 	if (days < 0) return `${Math.abs(days)} days overdue`;
 	if (days === 0) return "Due today";
 	return `${days} days left`;
+}
+
+// Shared by the Weekly Digest modal and the Overview tab's momentum section
+// — was previously only computed inline in the digest, risking drift.
+function milestoneProgress(quarter: Quarter): { done: number; total: number } {
+	const allItems: MilestoneItem[] = ([] as MilestoneItem[]).concat(...quarter.milestones.map((m) => m.items));
+	return { done: allItems.filter((i) => i.done).length, total: allItems.length };
+}
+
+// Consecutive calendar days (ending today, or yesterday if today isn't
+// logged yet — same "today doesn't break the streak" rule as habit
+// streaks) that have at least one check-in entry for this quarter.
+function checkinStreak(quarter: Quarter): number {
+	const days = new Set(Object.keys(quarter.checkins));
+	let streak = 0;
+	const cursor = new Date();
+	if (!days.has(todayStr())) cursor.setDate(cursor.getDate() - 1);
+	while (days.has(formatDate(cursor))) {
+		streak++;
+		cursor.setDate(cursor.getDate() - 1);
+	}
+	return streak;
 }
 
 // Shared by both the Quarter tab's Check-ins section and the Daily Note
@@ -246,6 +402,7 @@ interface LinkedHabitLite {
 	name: string;
 	color: string;
 	linkedGoal?: string;
+	kind?: "habit" | "task"; // from habit-tracker's ItemKind — tasks link the same way habits do
 }
 
 function getHabitTrackerHabits(app: App): LinkedHabitLite[] | null {
@@ -276,6 +433,24 @@ function getHabitStreak(app: App, habitId: string): number {
 		cursor = new Date(cursor.getTime() - 86400000);
 	}
 	return streak;
+}
+
+// Same cross-plugin entries read as getHabitStreak, but a fixed 7-day
+// completion count (today back to 6 days ago) for the Weekly Digest modal
+// rather than a running streak.
+function countWeeklyCompletions(app: App, habitId: string): number {
+	const anyApp = app as unknown as {
+		plugins: { plugins: Record<string, { data?: { entries?: Record<string, Record<string, unknown>> } }> };
+	};
+	const entries = anyApp.plugins?.plugins?.["habit-tracker"]?.data?.entries?.[habitId];
+	if (!entries) return 0;
+	let count = 0;
+	let cursor = new Date();
+	for (let i = 0; i < 7; i++) {
+		if (entries[formatDate(cursor)]) count++;
+		cursor = new Date(cursor.getTime() - 86400000);
+	}
+	return count;
 }
 
 // ---- Migration from the old Goals/*.md system (one-time, explicit) ----
@@ -646,7 +821,7 @@ class LifeCompassSettingTab extends PluginSettingTab {
 // ---- The main view ----
 
 const VIEW_TYPE = "life-compass-view";
-type Tab = "overview" | "vision" | "outcomes" | "quarter";
+type Tab = "overview" | "vision" | "outcomes" | "quarter" | "trends";
 
 class LifeCompassView extends ItemView {
 	plugin: LifeCompassPlugin;
@@ -682,6 +857,7 @@ class LifeCompassView extends ItemView {
 			{ id: "vision", label: "🎯 Vision" },
 			{ id: "outcomes", label: "🚀 Outcomes" },
 			{ id: "quarter", label: "📅 Quarter" },
+			{ id: "trends", label: "📈 Trends" },
 		];
 		for (const tab of tabs) {
 			const btn = tabRow.createEl("button", {
@@ -699,7 +875,8 @@ class LifeCompassView extends ItemView {
 		if (this.activeTab === "overview") this.renderOverview(body);
 		else if (this.activeTab === "vision") this.renderVision(body);
 		else if (this.activeTab === "outcomes") this.renderOutcomes(body);
-		else this.renderQuarter(body);
+		else if (this.activeTab === "quarter") this.renderQuarter(body);
+		else this.renderTrends(body);
 	}
 
 	// ---- Vision tab ----
@@ -716,6 +893,27 @@ class LifeCompassView extends ItemView {
 			text: ratings.length ? `Average satisfaction: ${avgRating} / 10 across ${ratings.length} rated categories` : "No categories rated yet.",
 			cls: "lc-outcome-metric",
 		});
+
+		const missingVision = this.plugin.data.categories.filter(
+			(c) => !this.plugin.data.vision[c.key]?.prose?.trim() && !this.plugin.data.vision[c.key]?.purpose?.trim()
+		);
+		if (missingVision.length) {
+			const nudge = body.createDiv({ cls: "lc-overview-card lc-vision-nudge" });
+			nudge.createDiv({ text: "✍️ Vision still needs writing", cls: "lc-field-label" });
+			nudge.createDiv({
+				text: `${missingVision.length} of ${this.plugin.data.categories.length} categories have a rating but no Purpose or Vivid-Future written yet. Numbers alone aren't a vision.`,
+				cls: "lc-outcome-metric",
+			});
+			const chipRow = nudge.createDiv({ cls: "lc-vision-nudge-chips" });
+			for (const cat of missingVision) {
+				const chip = chipRow.createEl("button", { text: cat.label, cls: "lc-vision-nudge-chip" });
+				chip.type = "button";
+				chip.onclick = () => {
+					this.activeTab = "vision";
+					this.render();
+				};
+			}
+		}
 
 		const current = this.plugin.data.quarters.find((q) => q.id === this.plugin.data.currentQuarterId);
 		const quarterCard = body.createDiv({ cls: "lc-overview-card" });
@@ -741,7 +939,56 @@ class LifeCompassView extends ItemView {
 			const progressTrack = progressWrap.createDiv({ cls: "lc-progress-track" });
 			const bar = progressTrack.createDiv({ cls: "lc-progress-bar" });
 			bar.style.width = `${Math.max(0, Math.min(100, o.progress ?? 0))}%`;
+			bar.toggleClass("lc-progress-bar-near-complete", (o.progress ?? 0) >= 75);
 			progressWrap.createSpan({ text: `${o.progress ?? 0}%`, cls: "lc-progress-label" });
+		}
+
+		// ---- Momentum: proof of progress already made, not what's still
+		// outstanding — pride/motivation register, the counterpart to Habit
+		// Tracker's own streak-at-risk pressure register. ----
+		const habits = getHabitTrackerHabits(this.plugin.app);
+		const linkedHabitIds = new Set(outcomes.reduce<string[]>((acc, o) => acc.concat(o.linkedHabitIds ?? []), []));
+		const topStreaks = (habits ?? [])
+			.filter((h) => linkedHabitIds.has(h.id))
+			.map((h) => ({ name: h.name, streak: getHabitStreak(this.plugin.app, h.id) }))
+			.filter((h) => h.streak > 0)
+			.sort((a, b) => b.streak - a.streak)
+			.slice(0, 3);
+
+		const ratingDeltas = this.plugin.data.categories
+			.map((cat) => {
+				const points = this.plugin.data.ratingHistory
+					.filter((e) => e.categoryKey === cat.key)
+					.sort((a, b) => a.date.localeCompare(b.date));
+				if (points.length < 2) return null;
+				const delta = points[points.length - 1].rating - points[0].rating;
+				return delta !== 0 ? { label: cat.label, delta, from: points[0].rating, to: points[points.length - 1].rating } : null;
+			})
+			.filter((d): d is { label: string; delta: number; from: number; to: number } => d !== null);
+
+		const hasMomentum = topStreaks.length > 0 || (current && milestoneProgress(current).done > 0) || (current && checkinStreak(current) > 0) || ratingDeltas.length > 0;
+		if (hasMomentum) {
+			const momentumCard = body.createDiv({ cls: "lc-overview-card lc-momentum-card" });
+			momentumCard.createDiv({ text: "🌟 Momentum", cls: "lc-field-label" });
+			for (const s of topStreaks) {
+				momentumCard.createDiv({ text: `🔥 ${s.streak}-day streak on ${s.name}`, cls: "lc-momentum-line" });
+			}
+			if (current) {
+				const { done: milestonesDone, total: milestonesTotal } = milestoneProgress(current);
+				if (milestonesDone > 0) {
+					momentumCard.createDiv({ text: `🏁 ${milestonesDone}/${milestonesTotal} milestones done this quarter`, cls: "lc-momentum-line" });
+				}
+				const streak = checkinStreak(current);
+				if (streak > 0) {
+					momentumCard.createDiv({ text: `📈 ${streak}-day check-in streak this quarter`, cls: "lc-momentum-line" });
+				}
+			}
+			for (const d of ratingDeltas) {
+				momentumCard.createDiv({
+					text: `${d.delta > 0 ? "⬆️" : "⬇️"} ${d.label}: ${d.from}→${d.to}, ${d.delta > 0 ? "up" : "down"} ${Math.abs(d.delta)}`,
+					cls: "lc-momentum-line",
+				});
+			}
 		}
 	}
 
@@ -769,6 +1016,11 @@ class LifeCompassView extends ItemView {
 				removeBtn.type = "button";
 				removeBtn.setAttr("aria-label", `Remove ${cat.label}`);
 				removeBtn.onclick = () => {
+					const linked = this.plugin.data.outcomes.filter((o) => !o.archived && o.visionCategory === cat.key);
+					if (linked.length) {
+						new Notice(`Can't remove "${cat.label}" — still linked from: ${linked.map((o) => o.name).join(", ")}. Reassign or archive those Outcomes first.`);
+						return;
+					}
 					new ConfirmDeleteModal(this.plugin.app, cat.label, async () => {
 						this.plugin.data.categories = this.plugin.data.categories.filter((c) => c.key !== cat.key);
 						delete this.plugin.data.vision[cat.key];
@@ -777,6 +1029,9 @@ class LifeCompassView extends ItemView {
 					}).open();
 				};
 			}
+
+			const hasVision = !!(this.plugin.data.vision[cat.key]?.prose?.trim() || this.plugin.data.vision[cat.key]?.purpose?.trim());
+			row.toggleClass("lc-wheel-row-needs-vision", !hasVision);
 
 			const ratingRow = row.createDiv({ cls: "lc-wheel-rating-buttons" });
 			const current = this.plugin.data.vision[cat.key]?.rating ?? 0;
@@ -790,17 +1045,32 @@ class LifeCompassView extends ItemView {
 					const wasSelected = this.plugin.data.vision[cat.key].rating === n;
 					const next = wasSelected ? 0 : n;
 					this.plugin.data.vision[cat.key].rating = next;
+					recordRatingHistory(this.plugin.data, cat.key, next);
 					await this.plugin.persist();
 					buttons.forEach((b, i) => b.toggleClass("lc-rating-btn-filled", i + 1 === next));
 					redrawChart();
 				};
 			}
 
+			const labelWrap = row.createDiv({ cls: "lc-field-label-row" });
+			labelWrap.createDiv({ text: "Purpose — why this matters", cls: "lc-field-label" });
+			if (!hasVision) labelWrap.createSpan({ text: "Not yet written", cls: "lc-vision-not-written-badge" });
+			const purpose = row.createEl("textarea", { cls: "lc-textarea lc-wheel-row-prose-input" });
+			purpose.rows = 2;
+			purpose.placeholder = "Why does this life area matter to you? What's it in service of?";
+			purpose.value = this.plugin.data.vision[cat.key]?.purpose ?? "";
+			purpose.setAttr("aria-label", `${cat.label} purpose`);
+			purpose.onblur = async () => {
+				this.plugin.data.vision[cat.key].purpose = purpose.value;
+				await this.plugin.persist();
+			};
+
+			row.createDiv({ text: "Vivid future — 3-5 years from now, as if it's already true", cls: "lc-field-label" });
 			const prose = row.createEl("textarea", { cls: "lc-textarea lc-wheel-row-prose-input" });
 			prose.rows = 3;
-			prose.placeholder = "What would this category look like if everything was exactly how you wanted it?";
+			prose.placeholder = "Describe this life area 3-5 years from now, exactly how you want it — sights, feelings, specifics.";
 			prose.value = this.plugin.data.vision[cat.key]?.prose ?? "";
-			prose.setAttr("aria-label", `${cat.label} vision`);
+			prose.setAttr("aria-label", `${cat.label} vivid future`);
 			prose.onblur = async () => {
 				this.plugin.data.vision[cat.key].prose = prose.value;
 				await this.plugin.persist();
@@ -914,6 +1184,133 @@ class LifeCompassView extends ItemView {
 		return svg;
 	}
 
+	// ---- Trends tab: line charts over ratingHistory/progressHistory, since
+	// the Vision wheel and Outcome cards only ever show current-state
+	// snapshots — this is the only place to see whether anything is
+	// actually moving. Reuses the hand-built SVG approach from buildChart()
+	// rather than pulling in a charting library. ----
+	renderTrends(body: HTMLElement) {
+		body.addClass("lc-trends-root");
+
+		body.createEl("h3", { text: "🎯 Vision ratings over time" });
+		if (this.plugin.data.ratingHistory.length === 0) {
+			body.createDiv({
+				text: "Come back after your first few rating changes — trends build up over time.",
+				cls: "lc-outcomes-empty",
+			});
+		} else {
+			const categories = this.plugin.data.categories;
+			const series = categories.map((cat) => ({
+				label: cat.label,
+				color: categoryColor(categories, cat.key),
+				points: this.plugin.data.ratingHistory
+					.filter((e) => e.categoryKey === cat.key)
+					.sort((a, b) => a.date.localeCompare(b.date))
+					.map((e) => ({ date: e.date, value: e.rating })),
+			})).filter((s) => s.points.length > 0);
+			body.appendChild(this.buildLineChart(series, 0, 10));
+		}
+
+		body.createEl("h3", { text: "🚀 Outcome progress over time" });
+		const activeOutcomes = this.plugin.data.outcomes.filter((o) => !o.archived);
+		const outcomesWithHistory = activeOutcomes.filter((o) => this.plugin.data.progressHistory.some((e) => e.outcomeId === o.id));
+		if (outcomesWithHistory.length === 0) {
+			body.createDiv({
+				text: "Once you update an Outcome's progress a few times, its trend line will show up here.",
+				cls: "lc-outcomes-empty",
+			});
+		} else {
+			const series = outcomesWithHistory.map((o, i) => ({
+				label: o.name,
+				color: categoryColor(this.plugin.data.categories, o.visionCategory) || CATEGORY_COLORS[i % CATEGORY_COLORS.length],
+				points: this.plugin.data.progressHistory
+					.filter((e) => e.outcomeId === o.id)
+					.sort((a, b) => a.date.localeCompare(b.date))
+					.map((e) => ({ date: e.date, value: e.progress })),
+			}));
+			body.appendChild(this.buildLineChart(series, 0, 100));
+		}
+	}
+
+	// A small multi-series line chart — shared x-axis of every distinct date
+	// across all series, y from minY to maxY. Same SVG-building conventions
+	// (svgNs, viewBox padding, .addClass styling) as buildChart() above.
+	buildLineChart(series: { label: string; color: string; points: { date: string; value: number }[] }[], minY: number, maxY: number): SVGSVGElement {
+		const width = 640;
+		const height = 260;
+		const padL = 36;
+		const padR = 16;
+		const padT = 16;
+		const padB = 28;
+		const svgNs = "http://www.w3.org/2000/svg";
+		const svg = document.createElementNS(svgNs, "svg") as unknown as SVGSVGElement;
+		svg.setAttribute("viewBox", `0 0 ${width} ${height}`);
+		svg.addClass("lc-trend-chart");
+
+		const dates = Array.from(new Set(series.reduce<string[]>((acc, s) => acc.concat(s.points.map((p) => p.date)), []))).sort();
+		if (dates.length === 0) return svg;
+
+		const xFor = (date: string) => {
+			const i = dates.indexOf(date);
+			return dates.length === 1 ? padL : padL + (i / (dates.length - 1)) * (width - padL - padR);
+		};
+		const yFor = (value: number) => height - padB - ((value - minY) / (maxY - minY)) * (height - padT - padB);
+
+		// Gridlines
+		for (let g = 0; g <= 4; g++) {
+			const value = minY + (g / 4) * (maxY - minY);
+			const y = yFor(value);
+			const line = document.createElementNS(svgNs, "line");
+			line.setAttribute("x1", "" + padL);
+			line.setAttribute("y1", "" + y);
+			line.setAttribute("x2", "" + (width - padR));
+			line.setAttribute("y2", "" + y);
+			line.addClass("lc-trend-grid-line");
+			svg.appendChild(line);
+			const label = document.createElementNS(svgNs, "text");
+			label.setAttribute("x", "" + (padL - 6));
+			label.setAttribute("y", "" + y);
+			label.setAttribute("text-anchor", "end");
+			label.setAttribute("dominant-baseline", "middle");
+			label.addClass("lc-trend-axis-label");
+			label.textContent = "" + Math.round(value);
+			svg.appendChild(label);
+		}
+
+		for (const s of series) {
+			if (s.points.length === 0) continue;
+			const linePoints = s.points.map((p) => `${xFor(p.date)},${yFor(p.value)}`).join(" ");
+			if (s.points.length > 1) {
+				const line = document.createElementNS(svgNs, "polyline");
+				line.setAttribute("points", linePoints);
+				line.setAttribute("fill", "none");
+				line.addClass("lc-trend-line");
+				line.style.setProperty("--lc-trend-color", s.color);
+				svg.appendChild(line);
+			}
+			for (const p of s.points) {
+				const dot = document.createElementNS(svgNs, "circle");
+				dot.setAttribute("cx", "" + xFor(p.date));
+				dot.setAttribute("cy", "" + yFor(p.value));
+				dot.setAttribute("r", "3");
+				dot.addClass("lc-trend-dot");
+				dot.style.setProperty("--lc-trend-color", s.color);
+				svg.appendChild(dot);
+			}
+			const last = s.points[s.points.length - 1];
+			const endLabel = document.createElementNS(svgNs, "text");
+			endLabel.setAttribute("x", "" + (xFor(last.date) + 6));
+			endLabel.setAttribute("y", "" + yFor(last.value));
+			endLabel.setAttribute("dominant-baseline", "middle");
+			endLabel.addClass("lc-trend-end-label");
+			endLabel.style.setProperty("--lc-trend-color", s.color);
+			endLabel.textContent = s.label;
+			svg.appendChild(endLabel);
+		}
+
+		return svg;
+	}
+
 	// ---- Outcomes tab ----
 	renderOutcomes(body: HTMLElement) {
 		body.addClass("lc-outcomes-root");
@@ -963,11 +1360,13 @@ class LifeCompassView extends ItemView {
 		if (catLabel) card.createDiv({ text: catLabel, cls: "lc-outcome-category" });
 		if (outcome.successMetric) card.createDiv({ text: outcome.successMetric, cls: "lc-outcome-metric" });
 		if (outcome.deadline) card.createDiv({ text: daysUntil(outcome.deadline), cls: "lc-outcome-deadline" });
+		if (outcome.obstacles) card.createDiv({ text: `Obstacles: ${outcome.obstacles}`, cls: "lc-outcome-obstacles" });
 
 		const progressWrap = card.createDiv({ cls: "lc-progress-wrap" });
 		const progressTrack = progressWrap.createDiv({ cls: "lc-progress-track" });
 		const progressBar = progressTrack.createDiv({ cls: "lc-progress-bar" });
 		progressBar.style.width = `${Math.max(0, Math.min(100, outcome.progress ?? 0))}%`;
+		progressBar.toggleClass("lc-progress-bar-near-complete", (outcome.progress ?? 0) >= 75);
 		progressWrap.createSpan({ text: `${outcome.progress ?? 0}%`, cls: "lc-progress-label" });
 
 		const linkedQuarterIds = this.plugin.data.quarters.filter((q) => q.outcomeId === outcome.id).map((q) => q.id.toLowerCase());
@@ -1071,6 +1470,8 @@ class LifeCompassView extends ItemView {
 
 		if (outcome) body.createDiv({ text: `Ladders up to: ${outcome.name}`, cls: "lc-outcome-category" });
 		if (current.successMetric) body.createDiv({ text: current.successMetric, cls: "lc-outcome-metric" });
+		const range = formatQuarterRange(current);
+		if (range) body.createDiv({ text: range, cls: "lc-outcome-category" });
 		if (current.deadline) body.createDiv({ text: daysUntil(current.deadline), cls: "lc-outcome-deadline" });
 
 		this.renderTextSection(body, "Priority — the ONE Wildly Important Goal", current.priority, async (v) => {
@@ -1081,12 +1482,10 @@ class LifeCompassView extends ItemView {
 			current.why = v;
 			await this.plugin.persist();
 		});
-		if (current.notes) {
-			this.renderTextSection(body, "Notes", current.notes, async (v) => {
-				current.notes = v;
-				await this.plugin.persist();
-			});
-		}
+		this.renderTextSection(body, "Notes", current.notes ?? "", async (v) => {
+			current.notes = v;
+			await this.plugin.persist();
+		});
 
 		const milestonesWrap = body.createDiv();
 		const redrawMilestones = () => {
@@ -1096,7 +1495,11 @@ class LifeCompassView extends ItemView {
 		redrawMilestones();
 
 		const systemSection = body.createDiv({ cls: "lc-quarter-section" });
-		systemSection.createEl("h4", { text: "System" });
+		systemSection.createEl("h4", { text: "System — Massive Action Plan (MAP)" });
+		systemSection.createEl("p", {
+			cls: "setting-item-description",
+			text: "RPM: the Result is the Priority above; this is the Massive Action Plan that actually gets you there.",
+		});
 		this.renderTextSection(systemSection, "Weekly Commitments", current.weeklyCommitments, async (v) => {
 			current.weeklyCommitments = v;
 			await this.plugin.persist();
@@ -1260,25 +1663,43 @@ class LifeCompassView extends ItemView {
 	}
 
 	renderPastQuarters(container: HTMLElement, currentId: string | null) {
-		const past = this.plugin.data.quarters.filter((q) => q.id !== currentId);
-		if (!past.length) return;
+		// Quarters now auto-generate for the whole year up front, so this
+		// list holds upcoming and already-elapsed quarters alike, not just
+		// past ones — "Other Quarters" covers both honestly.
+		const others = this.plugin.data.quarters.filter((q) => q.id !== currentId);
+		if (!others.length) return;
 		const section = container.createDiv({ cls: "lc-quarter-section" });
-		const toggle = section.createEl("h4", { text: `▸ Past Quarters (${past.length})`, cls: "lc-collapsible-toggle" });
+		const toggle = section.createEl("h4", { text: `▸ Other Quarters (${others.length})`, cls: "lc-collapsible-toggle" });
 		const list = section.createDiv({ cls: "lc-collapsible-body" });
 		toggle.onclick = () => {
 			const nowOpen = !list.hasClass("lc-collapsible-body-open");
 			list.toggleClass("lc-collapsible-body-open", nowOpen);
-			toggle.setText(`${nowOpen ? "▾" : "▸"} Past Quarters (${past.length})`);
+			toggle.setText(`${nowOpen ? "▾" : "▸"} Other Quarters (${others.length})`);
 		};
-		for (const q of past) {
+		for (const q of others) {
 			const outcome = this.plugin.data.outcomes.find((o) => o.id === q.outcomeId);
 			const card = list.createDiv({ cls: "lc-quarter-past-card" });
 			const header = card.createDiv({ cls: "lc-outcome-header" });
 			header.createDiv({ text: q.id, cls: "lc-outcome-title" });
 			header.createSpan({ text: q.status, cls: "lc-outcome-status lc-outcome-status-" + q.status });
+			const range = formatQuarterRange(q);
+			if (range) card.createDiv({ text: range, cls: "lc-outcome-category" });
 			if (q.priority) card.createDiv({ text: q.priority, cls: "lc-outcome-metric" });
 			if (outcome) card.createDiv({ text: `Ladders up to: ${outcome.name}`, cls: "lc-outcome-category" });
 			const actions = card.createDiv({ cls: "lc-outcome-actions lc-quarter-past-actions" });
+			const makeCurrentBtn = actions.createEl("button", { text: "→ Make current", cls: "lc-icon-btn" });
+			makeCurrentBtn.type = "button";
+			makeCurrentBtn.setAttr("aria-label", `Make ${q.id} the current quarter`);
+			makeCurrentBtn.onclick = async () => {
+				const prevCurrent = this.plugin.data.quarters.find((qq) => qq.id === currentId);
+				if (prevCurrent && prevCurrent.status === "active") {
+					prevCurrent.status = "done";
+					prevCurrent.updatedAt = todayStr();
+				}
+				this.plugin.data.currentQuarterId = q.id;
+				await this.plugin.persist();
+				this.render();
+			};
 			const editBtn = actions.createEl("button", { text: "✏️", cls: "lc-icon-btn" });
 			editBtn.type = "button";
 			editBtn.setAttr("aria-label", `Edit ${q.id}`);
@@ -1289,6 +1710,7 @@ class LifeCompassView extends ItemView {
 			delBtn.onclick = () => {
 				new ConfirmDeleteModal(this.plugin.app, q.id, async () => {
 					this.plugin.data.quarters = this.plugin.data.quarters.filter((qq) => qq.id !== q.id);
+					if (this.plugin.data.currentQuarterId === q.id) this.plugin.data.currentQuarterId = null;
 					await this.plugin.persist();
 					this.render();
 				}).open();
@@ -1327,6 +1749,70 @@ class ConfirmDeleteModal extends Modal {
 	}
 }
 
+// Shown at most once per Sunday evening (see maybeShowWeeklyDigest) — a
+// quick look back at the week's habits plus where the current quarter
+// stands, without having to open the full view.
+class WeeklyDigestModal extends Modal {
+	plugin: LifeCompassPlugin;
+
+	constructor(plugin: LifeCompassPlugin) {
+		super(plugin.app);
+		this.plugin = plugin;
+	}
+
+	onOpen() {
+		const { contentEl } = this;
+		contentEl.addClass("lc-modal");
+		contentEl.createEl("h3", { text: "📊 Weekly Digest" });
+		contentEl.createEl("p", {
+			text: "How the week went — habits and where the current quarter stands.",
+			cls: "setting-item-description",
+		});
+
+		// Omit this section entirely if Habit Tracker isn't installed/enabled,
+		// same defensive pattern as the Outcome cards' linked-habits section.
+		const habits = getHabitTrackerHabits(this.plugin.app);
+		if (habits && habits.length) {
+			const section = contentEl.createDiv({ cls: "lc-quarter-section" });
+			section.createEl("h4", { text: "This week's habits" });
+			const list = section.createDiv({ cls: "lc-digest-habit-list" });
+			for (const h of habits) {
+				const row = list.createDiv({ cls: "lc-outcome-habit-row" });
+				const dot = row.createSpan({ cls: "lc-outcome-habit-dot" });
+				dot.style.backgroundColor = h.color;
+				row.createSpan({ text: h.name, cls: "lc-outcome-habit-name" });
+				row.createSpan({ text: `${countWeeklyCompletions(this.plugin.app, h.id)}/7`, cls: "lc-outcome-habit-streak" });
+			}
+		}
+
+		const current = this.plugin.data.quarters.find((q) => q.id === this.plugin.data.currentQuarterId);
+		const quarterSection = contentEl.createDiv({ cls: "lc-quarter-section" });
+		quarterSection.createEl("h4", { text: "Current Quarter" });
+		if (current) {
+			quarterSection.createDiv({ text: current.priority || "(No Priority set yet.)", cls: "lc-outcome-metric" });
+			if (current.deadline) quarterSection.createDiv({ text: daysUntil(current.deadline), cls: "lc-outcome-deadline" });
+			const { done, total } = milestoneProgress(current);
+			quarterSection.createDiv({
+				text: total ? `Monthly milestones: ${done}/${total} done` : "No monthly milestones added yet.",
+				cls: "lc-outcome-metric",
+			});
+		} else {
+			quarterSection.createDiv({ text: "No active quarter — open Life Compass to start one.", cls: "lc-outcomes-empty" });
+		}
+
+		const footer = contentEl.createDiv({ cls: "lc-modal-footer" });
+		const openBtn = footer.createEl("button", { text: "Open Life Compass" });
+		openBtn.type = "button";
+		openBtn.onclick = () => {
+			this.close();
+			this.plugin.activateView();
+		};
+		const closeBtn = footer.createEl("button", { text: "Close", cls: "mod-cta" });
+		closeBtn.type = "button";
+		closeBtn.onclick = () => this.close();
+	}
+}
+
 class OutcomeFormModal extends Modal {
 	plugin: LifeCompassPlugin;
 	existing: Outcome | null;
@@ -1339,6 +1825,7 @@ class OutcomeFormModal extends Modal {
 		successMetric: string;
 		why: string;
 		baseline: string;
+		obstacles: string;
 		progress: number;
 	};
 	// Mutable draft, same pattern as QuarterFormModal's checkinFieldsDraft
@@ -1360,6 +1847,7 @@ class OutcomeFormModal extends Modal {
 					successMetric: existing.successMetric,
 					why: existing.why,
 					baseline: existing.baseline ?? "",
+					obstacles: existing.obstacles ?? "",
 					progress: existing.progress ?? 0,
 			  }
 			: {
@@ -1370,6 +1858,7 @@ class OutcomeFormModal extends Modal {
 					successMetric: "",
 					why: "",
 					baseline: "",
+					obstacles: "",
 					progress: 0,
 			  };
 	}
@@ -1380,10 +1869,19 @@ class OutcomeFormModal extends Modal {
 		contentEl.createEl("h3", { text: this.existing ? "Edit Outcome" : "New Outcome" });
 
 		new Setting(contentEl).setName("Name").addText((t) => t.setValue(this.values.name).onChange((v) => (this.values.name = v)));
+		const purposeRefEl = contentEl.createDiv({ cls: "setting-item-description lc-outcome-purpose-ref" });
+		const renderPurposeRef = () => {
+			const purpose = this.plugin.data.vision[this.values.visionCategory]?.purpose;
+			purposeRefEl.setText(purpose ? `This category's Purpose: "${purpose}"` : "");
+		};
 		new Setting(contentEl).setName("Vision Category").addDropdown((dd) => {
 			this.plugin.data.categories.forEach((c) => dd.addOption(c.key, c.label));
-			dd.setValue(this.values.visionCategory).onChange((v) => (this.values.visionCategory = v));
+			dd.setValue(this.values.visionCategory).onChange((v) => {
+				this.values.visionCategory = v;
+				renderPurposeRef();
+			});
 		});
+		renderPurposeRef();
 		new Setting(contentEl).setName("Deadline").addText((t) => {
 			t.inputEl.type = "date";
 			t.setValue(this.values.deadline).onChange((v) => (this.values.deadline = v));
@@ -1397,10 +1895,17 @@ class OutcomeFormModal extends Modal {
 		new Setting(contentEl)
 			.setName("Success Metric")
 			.addTextArea((t) => t.setValue(this.values.successMetric).onChange((v) => (this.values.successMetric = v)));
-		new Setting(contentEl).setName("Why").addTextArea((t) => t.setValue(this.values.why).onChange((v) => (this.values.why = v)));
+		new Setting(contentEl)
+			.setName("Why")
+			.setDesc("Why this specific Outcome matters — ideally it traces back to the category's Purpose above.")
+			.addTextArea((t) => t.setValue(this.values.why).onChange((v) => (this.values.why = v)));
 		new Setting(contentEl)
 			.setName("Baseline (optional)")
 			.addTextArea((t) => t.setValue(this.values.baseline).onChange((v) => (this.values.baseline = v)));
+		new Setting(contentEl)
+			.setName("Obstacles (optional)")
+			.setDesc("What's likely to get in the way.")
+			.addTextArea((t) => t.setValue(this.values.obstacles).onChange((v) => (this.values.obstacles = v)));
 		new Setting(contentEl)
 			.setName("Progress")
 			.setDesc("How far along toward the Success Metric, 0-100%.")
@@ -1423,7 +1928,7 @@ class OutcomeFormModal extends Modal {
 			contentEl.createEl("p", { text: "No habits yet in Habit Tracker.", cls: "setting-item-description" });
 		} else {
 			contentEl.createEl("p", {
-				text: "This is the System that actually drives this Outcome — check every habit that serves it.",
+				text: "Who do you need to become to hit this? This is the System that actually drives the Outcome — check every habit or task that serves it.",
 				cls: "setting-item-description",
 			});
 			const list = contentEl.createDiv({ cls: "lc-habit-picker" });
@@ -1442,6 +1947,9 @@ class OutcomeFormModal extends Modal {
 				const dot = row.createSpan({ cls: "lc-outcome-habit-dot" });
 				dot.style.backgroundColor = h.color;
 				row.createSpan({ text: h.name });
+				if (h.kind === "task") {
+					row.createSpan({ text: "TASK", cls: "lc-outcome-habit-task-badge" });
+				}
 			}
 		}
 
@@ -1453,6 +1961,12 @@ class OutcomeFormModal extends Modal {
 				new Notice("Name is required.");
 				return;
 			}
+			// You fall to the level of your systems — an Outcome can't go
+			// Active without at least one habit or task actually driving it.
+			if (this.values.status === "active" && this.linkedHabitIdsDraft.length === 0) {
+				new Notice("Link at least one habit or task before marking this Outcome Active — that's the System that actually drives it.");
+				return;
+			}
 			const now = todayStr();
 			if (this.existing) {
 				this.existing.name = this.values.name.trim();
@@ -1462,12 +1976,15 @@ class OutcomeFormModal extends Modal {
 				this.existing.successMetric = this.values.successMetric;
 				this.existing.why = this.values.why;
 				this.existing.baseline = this.values.baseline || undefined;
+				this.existing.obstacles = this.values.obstacles || undefined;
 				this.existing.progress = this.values.progress;
 				this.existing.linkedHabitIds = this.linkedHabitIdsDraft;
 				this.existing.updatedAt = now;
+				recordProgressHistory(this.plugin.data, this.existing.id, this.existing.progress);
 			} else {
+				const id = uid(slugify(this.values.name));
 				this.plugin.data.outcomes.push({
-					id: uid(slugify(this.values.name)),
+					id,
 					name: this.values.name.trim(),
 					visionCategory: this.values.visionCategory,
 					deadline: this.values.deadline,
@@ -1475,11 +1992,13 @@ class OutcomeFormModal extends Modal {
 					successMetric: this.values.successMetric,
 					why: this.values.why,
 					baseline: this.values.baseline || undefined,
+					obstacles: this.values.obstacles || undefined,
 					progress: this.values.progress,
 					linkedHabitIds: this.linkedHabitIdsDraft,
 					createdAt: now,
 					updatedAt: now,
 				});
+				recordProgressHistory(this.plugin.data, id, this.values.progress);
 			}
 			await this.plugin.persist();
 			this.onDone();
@@ -1493,8 +2012,8 @@ class QuarterFormModal extends Modal {
 	existing: Quarter | null;
 	onDone: () => void;
 	values: {
-		id: string;
 		outcomeId: string;
+		startDate: string;
 		deadline: string;
 		status: GoalStatus;
 		successMetric: string;
@@ -1515,8 +2034,8 @@ class QuarterFormModal extends Modal {
 		this.checkinFieldsDraft = existing ? existing.checkinFields.map((f) => ({ ...f })) : [];
 		this.values = existing
 			? {
-					id: existing.id,
 					outcomeId: existing.outcomeId,
+					startDate: existing.startDate ?? "",
 					deadline: existing.deadline,
 					status: existing.status,
 					successMetric: existing.successMetric,
@@ -1524,8 +2043,8 @@ class QuarterFormModal extends Modal {
 					why: existing.why,
 			  }
 			: {
-					id: "",
 					outcomeId: plugin.data.outcomes[0]?.id ?? "",
+					startDate: "",
 					deadline: "",
 					status: "active",
 					successMetric: "",
@@ -1539,17 +2058,28 @@ class QuarterFormModal extends Modal {
 		contentEl.addClass("lc-modal");
 		contentEl.createEl("h3", { text: this.existing ? "Edit Quarter" : "New Quarter" });
 
-		if (this.plugin.data.outcomes.length === 0) {
+		// A brand-new custom quarter needs an Outcome to ladder up to, but an
+		// already-existing (e.g. auto-generated) quarter should stay
+		// editable — Priority/Why/dates — even before any Outcome exists.
+		if (!this.existing && this.plugin.data.outcomes.length === 0) {
 			contentEl.createEl("p", { text: "Add an Outcome first — a Quarter needs something to ladder up to." });
 			return;
 		}
 
-		if (!this.existing) {
-			new Setting(contentEl).setName("Quarter ID").setDesc("e.g. 2026-Q4").addText((t) => t.setValue(this.values.id).onChange((v) => (this.values.id = v.trim())));
+		if (this.plugin.data.outcomes.length === 0) {
+			contentEl.createEl("p", {
+				text: "No Outcomes yet — add one to link this quarter to what it's actually laddering up to.",
+				cls: "setting-item-description",
+			});
+		} else {
+			new Setting(contentEl).setName("Outcome").addDropdown((dd) => {
+				this.plugin.data.outcomes.forEach((o) => dd.addOption(o.id, o.name));
+				dd.setValue(this.values.outcomeId).onChange((v) => (this.values.outcomeId = v));
+			});
 		}
-		new Setting(contentEl).setName("Outcome").addDropdown((dd) => {
-			this.plugin.data.outcomes.forEach((o) => dd.addOption(o.id, o.name));
-			dd.setValue(this.values.outcomeId).onChange((v) => (this.values.outcomeId = v));
+		new Setting(contentEl).setName("Start date").addText((t) => {
+			t.inputEl.type = "date";
+			t.setValue(this.values.startDate).onChange((v) => (this.values.startDate = v));
 		});
 		new Setting(contentEl).setName("Deadline").addText((t) => {
 			t.inputEl.type = "date";
@@ -1617,11 +2147,6 @@ class QuarterFormModal extends Modal {
 		const saveBtn = footer.createEl("button", { text: "Save", cls: "mod-cta" });
 		saveBtn.type = "button";
 		saveBtn.onclick = async () => {
-			const id = (this.existing ? this.existing.id : this.values.id).trim();
-			if (!id) {
-				new Notice("Quarter ID is required.");
-				return;
-			}
 			if (this.checkinFieldsDraft.some((f) => !f.label.trim())) {
 				new Notice("Give every check-in field a name, or remove the blank one(s).");
 				return;
@@ -1629,23 +2154,27 @@ class QuarterFormModal extends Modal {
 			const checkinFields: CheckinField[] = this.checkinFieldsDraft.map((f) => ({ key: f.key, label: f.label.trim(), type: f.type }));
 			const now = todayStr();
 
-			if (this.existing) {
-				this.existing.outcomeId = this.values.outcomeId;
-				this.existing.deadline = this.values.deadline;
-				this.existing.status = this.values.status;
-				this.existing.successMetric = this.values.successMetric;
-				this.existing.priority = this.values.priority;
-				this.existing.why = this.values.why;
-				this.existing.checkinFields = checkinFields;
-				this.existing.updatedAt = now;
+			// Quarter ids always follow the calendar (YYYY-Qn), derived from the
+			// chosen start date (or today if left blank) — never hand-typed, so
+			// two objects can never end up covering the same period again.
+			const id = this.existing ? this.existing.id : quarterIdForDate(this.values.startDate ? new Date(this.values.startDate) : new Date());
+			const target = this.existing ?? this.plugin.data.quarters.find((q) => q.id === id) ?? null;
+
+			if (target) {
+				target.outcomeId = this.values.outcomeId;
+				target.startDate = this.values.startDate || target.startDate;
+				target.deadline = this.values.deadline || target.deadline;
+				target.status = this.values.status;
+				target.successMetric = this.values.successMetric;
+				target.priority = this.values.priority;
+				target.why = this.values.why;
+				target.checkinFields = checkinFields;
+				target.updatedAt = now;
 			} else {
-				if (this.plugin.data.quarters.some((q) => q.id === id)) {
-					new Notice(`A quarter with id "${id}" already exists.`);
-					return;
-				}
 				this.plugin.data.quarters.push({
 					id,
 					outcomeId: this.values.outcomeId,
+					startDate: this.values.startDate || undefined,
 					deadline: this.values.deadline,
 					status: this.values.status,
 					successMetric: this.values.successMetric,
@@ -1660,8 +2189,8 @@ class QuarterFormModal extends Modal {
 					createdAt: now,
 					updatedAt: now,
 				});
-				this.plugin.data.currentQuarterId = id;
 			}
+			if (!this.existing) this.plugin.data.currentQuarterId = id;
 			await this.plugin.persist();
 			this.onDone();
 			this.close();
@@ -1710,6 +2239,21 @@ class DailyQuarterBlock extends MarkdownRenderChild {
 			el.createDiv({ text: current.priority, cls: "lc-daily-priority" });
 		}
 
+		const activeOutcomes = this.plugin.data.outcomes.filter((o) => !o.archived && o.status === "active");
+		const habits = getHabitTrackerHabits(this.plugin.app);
+		if (habits && activeOutcomes.length) {
+			const streakSection = el.createDiv({ cls: "lc-daily-streaks" });
+			for (const outcome of activeOutcomes) {
+				const linked = habits.filter((h) => (outcome.linkedHabitIds ?? []).includes(h.id));
+				if (!linked.length) continue;
+				const row = streakSection.createDiv({ cls: "lc-daily-streak-row" });
+				row.createSpan({ text: outcome.name, cls: "lc-daily-streak-outcome" });
+				for (const h of linked) {
+					row.createSpan({ text: `${h.name} 🔥${getHabitStreak(this.plugin.app, h.id)}`, cls: "lc-daily-streak-chip" });
+				}
+			}
+		}
+
 		renderCheckinTodayForm(el, this.plugin, current, () => {
 			this.render();
 			this.plugin.refreshMainViewOnly();
@@ -1744,12 +2288,22 @@ function mergeData(local: PluginData, remote: PluginData): PluginData {
 		quartersById.set(q.id, existing ? { ...existing, ...q, checkins: { ...existing.checkins, ...q.checkins } } : q);
 	}
 
+	const ratingHistoryByKey = new Map<string, RatingHistoryEntry>();
+	for (const e of remote.ratingHistory ?? []) ratingHistoryByKey.set(`${e.date}|${e.categoryKey}`, e);
+	for (const e of local.ratingHistory ?? []) ratingHistoryByKey.set(`${e.date}|${e.categoryKey}`, e);
+
+	const progressHistoryByKey = new Map<string, ProgressHistoryEntry>();
+	for (const e of remote.progressHistory ?? []) progressHistoryByKey.set(`${e.date}|${e.outcomeId}`, e);
+	for (const e of local.progressHistory ?? []) progressHistoryByKey.set(`${e.date}|${e.outcomeId}`, e);
+
 	return {
 		vision,
 		categories,
 		outcomes: Array.from(outcomesById.values()),
 		quarters: Array.from(quartersById.values()),
 		currentQuarterId: local.currentQuarterId ?? remote.currentQuarterId ?? null,
+		ratingHistory: Array.from(ratingHistoryByKey.values()),
+		progressHistory: Array.from(progressHistoryByKey.values()),
 	};
 }
 
@@ -1771,8 +2325,12 @@ export default class LifeCompassPlugin extends Plugin {
 			outcomes: saved?.outcomes ?? DEFAULT_DATA.outcomes,
 			quarters: saved?.quarters ?? DEFAULT_DATA.quarters,
 			currentQuarterId: saved?.currentQuarterId ?? DEFAULT_DATA.currentQuarterId,
+			ratingHistory: saved?.ratingHistory ?? [],
+			progressHistory: saved?.progressHistory ?? [],
 		};
 		this.ensureVisionDefaults();
+		if (migrateLegacyQuarterIds(this.data)) await this.persist();
+		await this.ensureCurrentYearQuarters();
 
 		this.addSettingTab(new LifeCompassSettingTab(this.app, this));
 		this.registerView(VIEW_TYPE, (leaf) => new LifeCompassView(leaf, this));
@@ -1791,6 +2349,21 @@ export default class LifeCompassPlugin extends Plugin {
 		if (this.settings.supabaseUrl && this.settings.supabaseAnonKey) {
 			await this.initSupabase();
 		}
+
+		this.app.workspace.onLayoutReady(() => this.maybeShowWeeklyDigest());
+	}
+
+	// Sunday evening (local time, hour >= 18), at most once per calendar day
+	// — guarded by settings.lastDigestShownDate so re-opening/reloading the
+	// vault later the same Sunday evening doesn't pop it again.
+	async maybeShowWeeklyDigest() {
+		const now = new Date();
+		if (now.getDay() !== 0 || now.getHours() < 18) return;
+		const today = todayStr();
+		if (this.settings.lastDigestShownDate === today) return;
+		this.settings.lastDigestShownDate = today;
+		await this.saveSettings();
+		new WeeklyDigestModal(this).open();
 	}
 
 	onunload() {
@@ -1801,6 +2374,24 @@ export default class LifeCompassPlugin extends Plugin {
 		for (const cat of this.data.categories) {
 			if (!this.data.vision[cat.key]) this.data.vision[cat.key] = { rating: 0, prose: "" };
 		}
+	}
+
+	// Auto-generates this calendar year's Q1-Q4 (dates already filled in)
+	// if they don't exist yet — runs on every load, so a new year's
+	// quarters appear the first time the vault is opened after rollover.
+	// If there's no current quarter pointed at yet, defaults it to
+	// whichever quarter contains today.
+	async ensureCurrentYearQuarters() {
+		const added = ensureQuartersForYear(this.data, new Date().getFullYear());
+		let currentChanged = false;
+		if (!this.data.currentQuarterId || !this.data.quarters.some((q) => q.id === this.data.currentQuarterId)) {
+			const todayId = quarterIdForDate(new Date());
+			if (this.data.quarters.some((q) => q.id === todayId) && this.data.currentQuarterId !== todayId) {
+				this.data.currentQuarterId = todayId;
+				currentChanged = true;
+			}
+		}
+		if (added.length || currentChanged) await this.persist();
 	}
 
 	async activateView() {
@@ -1826,6 +2417,8 @@ export default class LifeCompassPlugin extends Plugin {
 			outcomes: imported.outcomes,
 			quarters: imported.quarters,
 			currentQuarterId: imported.currentQuarterId,
+			ratingHistory: this.data.ratingHistory,
+			progressHistory: this.data.progressHistory,
 		};
 		this.ensureVisionDefaults();
 		await this.persist();
@@ -1917,6 +2510,12 @@ export default class LifeCompassPlugin extends Plugin {
 		if (row?.data) {
 			this.data = mergeData(this.data, row.data as PluginData);
 			this.ensureVisionDefaults();
+			// mergeData unions quarters by id (remote ∪ local) rather than
+			// letting local deletions win, so a legacy non-calendar quarter id
+			// already cleaned up locally can come back from an older remote
+			// copy — re-run the migration so the fix actually sticks once this
+			// gets persisted back up.
+			migrateLegacyQuarterIds(this.data);
 		}
 		await this.persist();
 		this.refreshViews();
@@ -1945,6 +2544,8 @@ export default class LifeCompassPlugin extends Plugin {
 						outcomes: incoming.outcomes ?? [],
 						quarters: incoming.quarters ?? [],
 						currentQuarterId: incoming.currentQuarterId ?? null,
+						ratingHistory: incoming.ratingHistory ?? [],
+						progressHistory: incoming.progressHistory ?? [],
 					};
 					this.ensureVisionDefaults();
 					this.saveLocal();
@@ -1962,6 +2563,8 @@ export default class LifeCompassPlugin extends Plugin {
 			outcomes: this.data.outcomes,
 			quarters: this.data.quarters,
 			currentQuarterId: this.data.currentQuarterId,
+			ratingHistory: this.data.ratingHistory,
+			progressHistory: this.data.progressHistory,
 		});
 	}
 
