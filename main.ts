@@ -108,8 +108,13 @@ interface Quarter {
 	why: string;
 	notes?: string; // catches anything that doesn't fit the standard sections
 	milestones: MonthlyMilestone[];
-	weeklyCommitments: string;
-	dailyActionsPrompt: string;
+	// Structured checklists (same MilestoneItem shape as Monthly Milestones),
+	// not free-text — the Massive Action Plan is meant to be the most
+	// actionable part of RPM, so it gets the same check-off interaction as
+	// everything else instead of being a plain paragraph. Older saved data
+	// may still have these as a single string; see normalizeActionItems().
+	weeklyCommitments: MilestoneItem[];
+	dailyActionsPrompt: MilestoneItem[];
 	obstacles: string;
 	checkinFields: CheckinField[];
 	checkins: Record<string, Record<string, string | number>>; // date -> field values
@@ -175,6 +180,53 @@ function todayStr(): string {
 	return formatDate(new Date());
 }
 
+// weeklyCommitments/dailyActionsPrompt used to be a single free-text
+// string; saved data from before that change (and data read straight off
+// disk/Supabase without going through TS types) may still be a raw
+// string at runtime despite the type now declaring MilestoneItem[]. Splits
+// each non-blank line into its own unchecked item so nothing is lost —
+// called defensively at render time rather than in every load path.
+function normalizeActionItems(value: unknown): MilestoneItem[] {
+	if (Array.isArray(value)) return value as MilestoneItem[];
+	if (typeof value === "string" && value.trim()) {
+		return value
+			.split("\n")
+			.map((line) => line.trim())
+			.filter(Boolean)
+			.map((text) => ({ text, done: false }));
+	}
+	return [];
+}
+
+// Every field in this plugin saves silently on blur — no confirmation a
+// given field actually persisted. A brief pulse on the field itself (CSS
+// animation, see .lc-save-flash in styles.css) closes that gap cheaply,
+// in the same spirit as Habit Tracker's cell-pop on check-in.
+// Overview's home-screen cards are div-based buttons (role="button" +
+// tabindex, not a real <button>, so they can still hold nested content) —
+// this wires up both mouse and keyboard activation identically rather than
+// leaving Enter/Space silently do nothing.
+function makeCardClickable(el: HTMLElement, onActivate: () => void) {
+	el.setAttr("role", "button");
+	el.setAttr("tabindex", "0");
+	el.addClass("lc-overview-card-clickable");
+	el.onclick = onActivate;
+	el.onkeydown = (e: KeyboardEvent) => {
+		if (e.key !== "Enter" && e.key !== " ") return;
+		e.preventDefault();
+		onActivate();
+	};
+}
+
+function flashSaved(el: HTMLElement) {
+	el.classList.remove("lc-save-flash");
+	// Force a reflow so re-adding the class restarts the animation even if
+	// it was just removed (e.g. two saves in quick succession).
+	void el.offsetWidth;
+	el.classList.add("lc-save-flash");
+	window.setTimeout(() => el.classList.remove("lc-save-flash"), 700);
+}
+
 function formatDate(d: Date): string {
 	const pad = (n: number) => (n < 10 ? "0" + n : "" + n);
 	return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
@@ -226,8 +278,8 @@ function ensureQuartersForYear(data: PluginData, year: number): string[] {
 			priority: "",
 			why: "",
 			milestones: [],
-			weeklyCommitments: "",
-			dailyActionsPrompt: "",
+			weeklyCommitments: [],
+			dailyActionsPrompt: [],
 			obstacles: "",
 			checkinFields: [],
 			checkins: {},
@@ -637,8 +689,8 @@ async function importFromGoalsNotes(app: App, existingVision: Record<string, Vis
 			why: isPlaceholder(why) ? "" : why,
 			notes,
 			milestones,
-			weeklyCommitments: isPlaceholder(weeklyCommitments) ? "" : weeklyCommitments,
-			dailyActionsPrompt: isPlaceholder(dailyActionsPrompt) ? "" : dailyActionsPrompt,
+			weeklyCommitments: normalizeActionItems(isPlaceholder(weeklyCommitments) ? "" : weeklyCommitments),
+			dailyActionsPrompt: normalizeActionItems(isPlaceholder(dailyActionsPrompt) ? "" : dailyActionsPrompt),
 			obstacles: isPlaceholder(obstacles) ? "" : obstacles,
 			checkinFields,
 			checkins,
@@ -823,9 +875,56 @@ class LifeCompassSettingTab extends PluginSettingTab {
 const VIEW_TYPE = "life-compass-view";
 type Tab = "overview" | "vision" | "outcomes" | "quarter" | "trends";
 
+// A guided first-run tour across tabs, in the spirit of Habit Tracker's own
+// walkthrough — but since each tab's content is torn down and rebuilt on
+// switch (not one always-mounted form), each step names which tab it needs
+// and the tour drives tab switches itself between steps rather than
+// assuming everything's already on screen.
+interface WalkthroughStep {
+	tab: Tab;
+	title: string;
+	body: string;
+	targetSelector: string;
+}
+
+const WALKTHROUGH_STEPS: WalkthroughStep[] = [
+	{
+		tab: "overview",
+		title: "Welcome to Life Compass",
+		body: "This is built around RPM: Vision (your Purpose) → Outcomes (the Results you're after) → Quarter (the Massive Action Plan that actually gets you there). This tour walks through each in order — Skip any time.",
+		targetSelector: ".lc-tab-row",
+	},
+	{
+		tab: "vision",
+		title: "Start with Vision",
+		body: "Rate each life area 1-10, then write its Purpose (why it matters) and a vivid future (what it looks like 3-5 years from now, as if it's already true). Numbers alone aren't a vision — the writing is what makes it real.",
+		targetSelector: ".lc-wheel-row",
+	},
+	{
+		tab: "outcomes",
+		title: "Turn Vision into Outcomes",
+		body: "An Outcome ladders up to one Vision category — a concrete Result with a Success Metric and a deadline. It can't go Active until it's linked to at least one Habit Tracker habit — that's the System that actually drives it.",
+		targetSelector: ".lc-add-btn",
+	},
+	{
+		tab: "quarter",
+		title: "This quarter's ONE Priority",
+		body: "Every quarter auto-generates with real dates. Set the one Wildly Important Goal, break it into Monthly Milestones, and check off your Weekly Commitments and Daily Actions — the Massive Action Plan — as you go.",
+		targetSelector: ".lc-quarter-header, .lc-add-btn",
+	},
+	{
+		tab: "overview",
+		title: "Overview is home",
+		body: "Come back here first. Every card is clickable — jump straight into whichever tab needs attention — and Momentum shows what's actually working, not just what's still outstanding.",
+		targetSelector: ".lc-overview-card",
+	},
+];
+
 class LifeCompassView extends ItemView {
 	plugin: LifeCompassPlugin;
 	activeTab: Tab = "overview";
+	walkthroughStep = -1; // -1 = inactive
+	private walkthroughEls: { backdrop: HTMLElement; tooltip: HTMLElement } | null = null;
 
 	constructor(leaf: WorkspaceLeaf, plugin: LifeCompassPlugin) {
 		super(leaf);
@@ -844,6 +943,10 @@ class LifeCompassView extends ItemView {
 
 	async onOpen() {
 		this.render();
+	}
+
+	async onClose() {
+		this.walkthroughEls?.backdrop.remove();
 	}
 
 	render() {
@@ -871,12 +974,91 @@ class LifeCompassView extends ItemView {
 			};
 		}
 
+		const walkthroughBtn = tabRow.createEl("button", { text: "🎓 Walkthrough", cls: "lc-walkthrough-btn" });
+		walkthroughBtn.type = "button";
+		walkthroughBtn.onclick = () => this.startWalkthrough();
+
 		const body = root.createDiv({ cls: "lc-tab-body" });
 		if (this.activeTab === "overview") this.renderOverview(body);
 		else if (this.activeTab === "vision") this.renderVision(body);
 		else if (this.activeTab === "outcomes") this.renderOutcomes(body);
 		else if (this.activeTab === "quarter") this.renderQuarter(body);
 		else this.renderTrends(body);
+
+		if (this.walkthroughStep >= 0) this.showWalkthroughStep(body);
+	}
+
+	startWalkthrough() {
+		this.walkthroughStep = 0;
+		this.activeTab = WALKTHROUGH_STEPS[0].tab;
+		this.render();
+	}
+
+	endWalkthrough() {
+		this.walkthroughStep = -1;
+		this.walkthroughEls?.backdrop.remove();
+		this.walkthroughEls = null;
+		this.render();
+	}
+
+	// Renders (or re-renders, on Next/Back) the spotlight + tooltip for the
+	// current step, targeting an element within the tab body that was just
+	// built by render() above. A fixed-position overlay appended to <body>
+	// (same pattern as Habit Tracker's settings backdrop) rather than
+	// anchored inside the pane, since this is a full ItemView, not a modal —
+	// no scroll-clipping concerns to work around here.
+	showWalkthroughStep(body: HTMLElement) {
+		this.walkthroughEls?.backdrop.remove();
+
+		const step = WALKTHROUGH_STEPS[this.walkthroughStep];
+		const target = body.querySelector<HTMLElement>(step.targetSelector) ?? body;
+		target.addClass("lc-walkthrough-highlight");
+		target.scrollIntoView({ block: "center", behavior: "smooth" });
+
+		const backdrop = document.body.createDiv({ cls: "lc-walkthrough-tooltip-backdrop" });
+		const tooltip = backdrop.createDiv({ cls: "lc-walkthrough-tooltip" });
+		tooltip.createDiv({ text: `Step ${this.walkthroughStep + 1} of ${WALKTHROUGH_STEPS.length}`, cls: "lc-walkthrough-progress" });
+		tooltip.createEl("strong", { text: step.title, cls: "lc-walkthrough-title" });
+		tooltip.createEl("p", { text: step.body, cls: "lc-walkthrough-body" });
+
+		const btnRow = tooltip.createDiv({ cls: "lc-walkthrough-btns" });
+		const skipBtn = btnRow.createEl("button", { text: "Skip", cls: "lc-walkthrough-skip" });
+		skipBtn.type = "button";
+		skipBtn.onclick = () => this.endWalkthrough();
+
+		if (this.walkthroughStep > 0) {
+			const backBtn = btnRow.createEl("button", { text: "Back" });
+			backBtn.type = "button";
+			backBtn.onclick = () => {
+				this.walkthroughStep--;
+				this.activeTab = WALKTHROUGH_STEPS[this.walkthroughStep].tab;
+				this.render();
+			};
+		}
+
+		const isLast = this.walkthroughStep === WALKTHROUGH_STEPS.length - 1;
+		const nextBtn = btnRow.createEl("button", { text: isLast ? "Got it" : "Next", cls: "mod-cta" });
+		nextBtn.type = "button";
+		nextBtn.onclick = () => {
+			if (isLast) {
+				this.endWalkthrough();
+				return;
+			}
+			this.walkthroughStep++;
+			this.activeTab = WALKTHROUGH_STEPS[this.walkthroughStep].tab;
+			this.render();
+		};
+
+		window.setTimeout(() => {
+			const targetRect = target.getBoundingClientRect();
+			const maxLeft = Math.max(8, window.innerWidth - tooltip.offsetWidth - 8);
+			tooltip.style.left = `${Math.min(Math.max(8, targetRect.left), maxLeft)}px`;
+			const belowTop = targetRect.bottom + 12;
+			const fitsBelow = belowTop + tooltip.offsetHeight < window.innerHeight - 8;
+			tooltip.style.top = `${fitsBelow ? belowTop : Math.max(8, targetRect.top - tooltip.offsetHeight - 12)}px`;
+		}, 260);
+
+		this.walkthroughEls = { backdrop, tooltip };
 	}
 
 	// ---- Vision tab ----
@@ -888,6 +1070,10 @@ class LifeCompassView extends ItemView {
 		const ratings = this.plugin.data.categories.map((c) => this.plugin.data.vision[c.key]?.rating ?? 0).filter((r) => r > 0);
 		const avgRating = ratings.length ? (ratings.reduce((a, b) => a + b, 0) / ratings.length).toFixed(1) : "—";
 		const visionCard = body.createDiv({ cls: "lc-overview-card" });
+		makeCardClickable(visionCard, () => {
+			this.activeTab = "vision";
+			this.render();
+		});
 		visionCard.createDiv({ text: "🎯 Vision", cls: "lc-field-label" });
 		visionCard.createDiv({
 			text: ratings.length ? `Average satisfaction: ${avgRating} / 10 across ${ratings.length} rated categories` : "No categories rated yet.",
@@ -917,10 +1103,18 @@ class LifeCompassView extends ItemView {
 
 		const current = this.plugin.data.quarters.find((q) => q.id === this.plugin.data.currentQuarterId);
 		const quarterCard = body.createDiv({ cls: "lc-overview-card" });
+		makeCardClickable(quarterCard, () => {
+			this.activeTab = "quarter";
+			this.render();
+		});
 		quarterCard.createDiv({ text: "📅 Current Quarter", cls: "lc-field-label" });
 		if (current) {
 			quarterCard.createDiv({ text: current.id, cls: "lc-outcome-title" });
-			if (current.priority) quarterCard.createDiv({ text: current.priority, cls: "lc-outcome-metric" });
+			// The Priority is the single most important sentence in the app —
+			// the one Wildly Important Goal everything else ladders up to —
+			// so it gets real visual weight here instead of blending in with
+			// every other stat line on this tab.
+			if (current.priority) quarterCard.createDiv({ text: current.priority, cls: "lc-overview-priority" });
 			if (current.deadline) quarterCard.createDiv({ text: daysUntil(current.deadline), cls: "lc-outcome-deadline" });
 		} else {
 			quarterCard.createDiv({ text: "No active quarter.", cls: "lc-outcomes-empty" });
@@ -928,6 +1122,10 @@ class LifeCompassView extends ItemView {
 
 		const outcomes = this.plugin.data.outcomes.filter((o) => !o.archived);
 		const outcomesCard = body.createDiv({ cls: "lc-overview-card" });
+		makeCardClickable(outcomesCard, () => {
+			this.activeTab = "outcomes";
+			this.render();
+		});
 		outcomesCard.createDiv({ text: "🚀 Outcomes", cls: "lc-field-label" });
 		const active = outcomes.filter((o) => o.status === "active").length;
 		const done = outcomes.filter((o) => o.status === "done").length;
@@ -1061,8 +1259,10 @@ class LifeCompassView extends ItemView {
 			purpose.value = this.plugin.data.vision[cat.key]?.purpose ?? "";
 			purpose.setAttr("aria-label", `${cat.label} purpose`);
 			purpose.onblur = async () => {
+				const changed = purpose.value !== (this.plugin.data.vision[cat.key]?.purpose ?? "");
 				this.plugin.data.vision[cat.key].purpose = purpose.value;
 				await this.plugin.persist();
+				if (changed) flashSaved(purpose);
 			};
 
 			row.createDiv({ text: "Vivid future — 3-5 years from now, as if it's already true", cls: "lc-field-label" });
@@ -1072,8 +1272,10 @@ class LifeCompassView extends ItemView {
 			prose.value = this.plugin.data.vision[cat.key]?.prose ?? "";
 			prose.setAttr("aria-label", `${cat.label} vivid future`);
 			prose.onblur = async () => {
+				const changed = prose.value !== (this.plugin.data.vision[cat.key]?.prose ?? "");
 				this.plugin.data.vision[cat.key].prose = prose.value;
 				await this.plugin.persist();
+				if (changed) flashSaved(prose);
 			};
 		}
 
@@ -1358,8 +1560,19 @@ class LifeCompassView extends ItemView {
 
 		const catLabel = this.plugin.data.categories.find((c) => c.key === outcome.visionCategory)?.label;
 		if (catLabel) card.createDiv({ text: catLabel, cls: "lc-outcome-category" });
+
+		// The Quarter tab already shows "Ladders up to: <Outcome name>" —
+		// this is the reverse direction, so the connection reads both ways
+		// instead of only from Quarter→Outcome.
+		const currentQuarter = this.plugin.data.quarters.find((q) => q.id === this.plugin.data.currentQuarterId);
+		if (currentQuarter && currentQuarter.outcomeId === outcome.id) {
+			card.createDiv({ text: `🧭 Currently worked on in ${currentQuarter.id}`, cls: "lc-outcome-current-quarter-badge" });
+		}
+
 		if (outcome.successMetric) card.createDiv({ text: outcome.successMetric, cls: "lc-outcome-metric" });
 		if (outcome.deadline) card.createDiv({ text: daysUntil(outcome.deadline), cls: "lc-outcome-deadline" });
+		if (outcome.why) card.createDiv({ text: `Why: ${outcome.why}`, cls: "lc-outcome-why" });
+		if (outcome.baseline) card.createDiv({ text: `Baseline: ${outcome.baseline}`, cls: "lc-outcome-obstacles" });
 		if (outcome.obstacles) card.createDiv({ text: `Obstacles: ${outcome.obstacles}`, cls: "lc-outcome-obstacles" });
 
 		const progressWrap = card.createDiv({ cls: "lc-progress-wrap" });
@@ -1500,14 +1713,29 @@ class LifeCompassView extends ItemView {
 			cls: "setting-item-description",
 			text: "RPM: the Result is the Priority above; this is the Massive Action Plan that actually gets you there.",
 		});
-		this.renderTextSection(systemSection, "Weekly Commitments", current.weeklyCommitments, async (v) => {
-			current.weeklyCommitments = v;
-			await this.plugin.persist();
-		});
-		this.renderTextSection(systemSection, "Daily Actions", current.dailyActionsPrompt, async (v) => {
-			current.dailyActionsPrompt = v;
-			await this.plugin.persist();
-		});
+		// Older saved data may still have these as a single string — migrate
+		// in place on first render so the checklist UI below always has a
+		// real array to work with, and persist so it stays migrated.
+		if (!Array.isArray(current.weeklyCommitments)) {
+			current.weeklyCommitments = normalizeActionItems(current.weeklyCommitments);
+			this.plugin.persist();
+		}
+		if (!Array.isArray(current.dailyActionsPrompt)) {
+			current.dailyActionsPrompt = normalizeActionItems(current.dailyActionsPrompt);
+			this.plugin.persist();
+		}
+		const weeklyWrap = systemSection.createDiv();
+		const redrawWeekly = () => {
+			weeklyWrap.empty();
+			this.renderActionChecklist(weeklyWrap, "Weekly Commitments", current.weeklyCommitments, redrawWeekly);
+		};
+		redrawWeekly();
+		const dailyWrap = systemSection.createDiv();
+		const redrawDaily = () => {
+			dailyWrap.empty();
+			this.renderActionChecklist(dailyWrap, "Daily Actions", current.dailyActionsPrompt, redrawDaily);
+		};
+		redrawDaily();
 
 		this.renderTextSection(body, "Obstacles", current.obstacles, async (v) => {
 			current.obstacles = v;
@@ -1549,7 +1777,11 @@ class LifeCompassView extends ItemView {
 		textarea.rows = 3;
 		textarea.value = value;
 		textarea.setAttr("aria-label", label);
-		textarea.onblur = () => onSave(textarea.value);
+		textarea.onblur = async () => {
+			const changed = textarea.value !== value;
+			await onSave(textarea.value);
+			if (changed) flashSaved(textarea);
+		};
 	}
 
 	renderMilestonesInto(section: HTMLElement, quarter: Quarter, redraw: () => void) {
@@ -1632,6 +1864,58 @@ class LifeCompassView extends ItemView {
 			quarter.milestones.push({ month: monthInput.value.trim(), title: titleInput.value.trim(), items: [] });
 			await this.plugin.persist();
 			redraw();
+		};
+	}
+
+	// Weekly Commitments / Daily Actions — same MilestoneItem shape and
+	// check-off interaction as Monthly Milestones' items, just a flat list
+	// with no month grouping.
+	renderActionChecklist(container: HTMLElement, label: string, items: MilestoneItem[], redraw: () => void) {
+		container.createDiv({ text: label, cls: "lc-field-label" });
+
+		const list = container.createDiv({ cls: "lc-milestone-items" });
+		items.forEach((item, ii) => {
+			const row = list.createDiv({ cls: "lc-milestone-item" });
+			const cb = row.createEl("input", { cls: "lc-milestone-checkbox" });
+			cb.type = "checkbox";
+			cb.checked = item.done;
+			cb.setAttr("aria-label", item.text);
+			cb.onchange = async () => {
+				item.done = cb.checked;
+				await this.plugin.persist();
+				if (item.done) row.addClass("lc-milestone-item-pop");
+				redraw();
+			};
+			row.createSpan({ text: item.text, cls: "lc-milestone-item-text" + (item.done ? " lc-milestone-item-done" : "") });
+			const delBtn = row.createEl("button", { text: "×", cls: "lc-milestone-remove" });
+			delBtn.type = "button";
+			delBtn.setAttr("aria-label", `Delete "${item.text}"`);
+			delBtn.onclick = async () => {
+				items.splice(ii, 1);
+				await this.plugin.persist();
+				redraw();
+			};
+		});
+
+		const addRow = container.createDiv({ cls: "lc-milestone-add-row" });
+		const addInput = addRow.createEl("input", { cls: "lc-inline-input" });
+		addInput.placeholder = `Add a${label.startsWith("Weekly") ? " weekly commitment" : "n action"}…`;
+		addInput.setAttr("aria-label", `Add to ${label}`);
+		const addBtn = addRow.createEl("button", { text: "+", cls: "lc-icon-btn" });
+		addBtn.type = "button";
+		addBtn.setAttr("aria-label", "Add item");
+		const submit = async () => {
+			if (!addInput.value.trim()) return;
+			items.push({ text: addInput.value.trim(), done: false });
+			await this.plugin.persist();
+			redraw();
+		};
+		addBtn.onclick = submit;
+		addInput.onkeydown = (e) => {
+			if (e.key === "Enter") {
+				e.preventDefault();
+				submit();
+			}
 		};
 	}
 
@@ -2181,8 +2465,8 @@ class QuarterFormModal extends Modal {
 					priority: this.values.priority,
 					why: this.values.why,
 					milestones: [],
-					weeklyCommitments: "",
-					dailyActionsPrompt: "",
+					weeklyCommitments: [],
+					dailyActionsPrompt: [],
 					obstacles: "",
 					checkinFields,
 					checkins: {},

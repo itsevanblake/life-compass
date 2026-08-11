@@ -25,6 +25,7 @@ body.theme-dark {
 
 .lc-tab-row {
 	display: flex;
+	flex-wrap: wrap;
 	gap: 6px;
 	margin-bottom: var(--lc-space-4);
 	border-bottom: 1px solid var(--background-modifier-border);
@@ -53,6 +54,109 @@ body.theme-dark {
 .lc-tab-btn-active:hover {
 	background-color: var(--interactive-accent);
 	color: var(--text-on-accent);
+}
+
+.lc-walkthrough-btn {
+	margin-left: auto;
+	font-size: 0.8em;
+	font-weight: 500;
+	padding: 5px 10px;
+	cursor: pointer;
+	background-color: var(--background-secondary);
+	border: 1px solid var(--background-modifier-border);
+	border-radius: var(--lc-radius-md);
+	color: var(--text-muted);
+	box-shadow: none;
+	transition: border-color 0.12s ease, color 0.12s ease, background-color 0.12s ease;
+}
+
+.lc-walkthrough-btn:hover {
+	border-color: var(--interactive-accent);
+	color: var(--text-normal);
+}
+
+/* ---- Walkthrough overlay ---- */
+/* Fixed to the viewport (not the modal-relative approach Habit Tracker's
+   walkthrough uses) since this is a full ItemView pane, not a modal — no
+   scroll-clipping to work around, and the underlying tab stays visible
+   rather than dimmed, since the tour drives navigation itself via
+   Next/Back rather than needing the user to interact with it directly. */
+.lc-walkthrough-tooltip-backdrop {
+	position: fixed;
+	inset: 0;
+	z-index: 100;
+	pointer-events: none;
+}
+
+.lc-walkthrough-tooltip {
+	position: fixed;
+	pointer-events: auto;
+	width: min(340px, calc(100vw - 24px));
+	padding: 14px 16px;
+	border-radius: var(--lc-radius-lg);
+	background-color: var(--background-primary);
+	border: 1px solid var(--interactive-accent);
+	box-shadow: var(--lc-shadow-md);
+	animation: lc-walkthrough-tooltip-in 0.18s ease-out;
+}
+
+@keyframes lc-walkthrough-tooltip-in {
+	from {
+		opacity: 0;
+		transform: translateY(-4px);
+	}
+	to {
+		opacity: 1;
+		transform: translateY(0);
+	}
+}
+
+.lc-walkthrough-progress {
+	font-size: 0.72em;
+	font-weight: 700;
+	color: var(--interactive-accent);
+	text-transform: uppercase;
+	letter-spacing: 0.04em;
+	margin-bottom: 4px;
+}
+
+.lc-walkthrough-title {
+	display: block;
+	font-size: 0.98em;
+	margin-bottom: 4px;
+}
+
+.lc-walkthrough-body {
+	margin: 0 0 12px;
+	font-size: 0.86em;
+	color: var(--text-muted);
+	line-height: 1.45;
+}
+
+.lc-walkthrough-btns {
+	display: flex;
+	align-items: center;
+	justify-content: flex-end;
+	gap: 8px;
+}
+
+.lc-walkthrough-skip {
+	margin-right: auto;
+	background: transparent;
+	box-shadow: none;
+	color: var(--text-muted);
+	font-size: 0.8em;
+}
+
+.lc-walkthrough-skip:hover {
+	color: var(--text-normal);
+}
+
+.lc-walkthrough-highlight {
+	position: relative;
+	outline: 2px solid var(--interactive-accent);
+	outline-offset: 4px;
+	border-radius: var(--lc-radius-md);
 }
 
 .lc-add-btn {
@@ -310,6 +414,17 @@ body.theme-dark {
 .lc-outcome-metric {
 	font-size: 0.88em;
 	margin-bottom: 4px;
+}
+
+.lc-outcome-current-quarter-badge {
+	display: inline-block;
+	font-size: 0.72em;
+	font-weight: 600;
+	color: var(--interactive-accent);
+	background-color: color-mix(in srgb, var(--interactive-accent) 14%, transparent);
+	border-radius: var(--lc-radius-md, 6px);
+	padding: 2px 8px;
+	margin-bottom: 6px;
 }
 
 .lc-outcome-deadline {
@@ -625,6 +740,31 @@ body.theme-dark {
 	background-color: var(--background-primary-alt, var(--background-secondary));
 }
 
+/* Overview is the app's home screen — its top-level cards jump straight to
+   the tab they summarize, so this needs to read as clickable rather than
+   just decorative. */
+.lc-overview-card-clickable {
+	cursor: pointer;
+	transition: border-color 0.12s ease, box-shadow 0.12s ease;
+}
+
+.lc-overview-card-clickable:hover,
+.lc-overview-card-clickable:focus-visible {
+	border-color: var(--interactive-accent);
+	box-shadow: var(--lc-shadow-sm, 0 1px 6px rgba(0, 0, 0, 0.15));
+}
+
+/* The one Wildly Important Goal — the single most important sentence in
+   the app — gets real visual weight on the home screen instead of reading
+   like every other stat line. */
+.lc-overview-priority {
+	font-size: 1.15em;
+	font-weight: 700;
+	color: var(--interactive-accent);
+	line-height: 1.35;
+	margin: 4px 0 6px;
+}
+
 .lc-overview-outcome-row {
 	display: flex;
 	align-items: center;
@@ -749,6 +889,26 @@ body.theme-dark {
 .lc-milestone-group-celebrate {
 	animation: lc-celebrate 1.4s ease-out;
 	border-radius: var(--lc-radius-md);
+}
+
+/* Every field in this app saves silently on blur — this is the one visual
+   confirmation a save actually happened, so it needs to read as distinct
+   from lc-celebrate (a bigger, rarer moment) while still feeling like part
+   of the same family: a quick accent-colored pulse on the field itself. */
+@keyframes lc-save-flash {
+	0% {
+		box-shadow: 0 0 0 0 color-mix(in srgb, var(--interactive-accent) 55%, transparent);
+	}
+	30% {
+		box-shadow: 0 0 0 2px color-mix(in srgb, var(--interactive-accent) 55%, transparent);
+	}
+	100% {
+		box-shadow: 0 0 0 0 transparent;
+	}
+}
+
+.lc-save-flash {
+	animation: lc-save-flash 0.7s ease-out;
 }
 
 /* ---- Modals ---- */
@@ -879,7 +1039,19 @@ body.theme-dark {
 	padding: 2px 0;
 }
 
-/* ---- Outcome obstacles ---- */
+/* ---- Outcome Why / Baseline / Obstacles ---- */
+
+/* Why gets its own slightly more prominent treatment (italic, closer to
+   text-normal than text-muted) since it's the RPM Purpose→Result thread —
+   the whole reason this Outcome exists — not just supplementary detail
+   like Baseline/Obstacles. */
+.lc-outcome-why {
+	font-size: 0.88em;
+	font-style: italic;
+	color: var(--text-normal);
+	margin-top: 4px;
+	line-height: 1.4;
+}
 
 .lc-outcome-obstacles {
 	font-size: 0.85em;
