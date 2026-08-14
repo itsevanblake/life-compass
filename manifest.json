@@ -1,7 +1,7 @@
 {
   "id": "life-compass",
   "name": "Life Compass",
-  "version": "2.10.0",
+  "version": "2.11.0",
   "minAppVersion": "1.4.0",
   "description": "All-in-one Vision, Outcomes, and Quarterly goal system with a Wheel of Life, real-time Supabase sync, and habit-tracker integration \u2014 no markdown notes required.",
   "author": "Evan Gooch",
