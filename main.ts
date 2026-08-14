@@ -155,13 +155,164 @@ const DEFAULT_DATA: PluginData = {
 	progressHistory: [],
 };
 
+// ---- Design Tweaks (live theme editor) ----------------------------------
+// Ported from Habit Tracker's own Design Tweaks system, scoped to what this
+// pilot pass actually restyles rather than porting all ~50 of its knobs —
+// there is no Habit-Tracker-style day-cell grid or milestone bubble here,
+// so knobs for those would be dead weight with nothing to drive. Same
+// mechanism throughout: a spec array of tunable values, a sparse
+// overrides map (only entries that differ from shipped defaults are
+// stored), and a live-preview panel that writes CSS custom properties
+// straight onto .lc-view-root.
+
+type TweakKind = "color" | "range" | "select" | "toggle" | "font";
+
+interface TweakDef {
+	id: string;
+	label: string;
+	group: string;
+	kind: TweakKind;
+	def: string;
+	cssVar?: string;
+	bodyClass?: string;
+	min?: number;
+	max?: number;
+	step?: number;
+	unit?: string;
+	options?: Array<{ value: string; label: string }>;
+	help?: string;
+}
+
+const TWEAK_FONT_STACKS: Array<{ value: string; label: string }> = [
+	{ value: `"Bahnschrift", "Avenir Next Condensed", "Futura", "Segoe UI", system-ui, sans-serif`, label: "Bahnschrift (display)" },
+	{ value: `"DM Sans", "Segoe UI", system-ui, sans-serif`, label: "DM Sans (body)" },
+	{ value: `"Georgia", "Iowan Old Style", serif`, label: "Georgia (serif)" },
+	{ value: `ui-monospace, "SF Mono", Menlo, monospace`, label: "Monospace" },
+];
+
+const LC_TWEAK_SPEC: TweakDef[] = [
+	// ---- Color ----
+	{ id: "accent", label: "Accent", group: "Color", kind: "color", def: "#a855f7", cssVar: "--lcx-glow-violet", help: "The main violet. Drives borders, the active tab, and focus rings." },
+	{ id: "accentBright", label: "Accent (bright)", group: "Color", kind: "color", def: "#c084fc", cssVar: "--lcx-glow-violet-bright" },
+	{ id: "accentSoft", label: "Accent (deep)", group: "Color", kind: "color", def: "#6d28d9", cssVar: "--lcx-violet-soft", help: "The darker end of the accent, used in the panel wash." },
+	{ id: "bg", label: "Page ground", group: "Color", kind: "color", def: "#0a0713", cssVar: "--lcx-bg" },
+	{ id: "bg2", label: "Page ground (top)", group: "Color", kind: "color", def: "#120a24", cssVar: "--lcx-bg-2" },
+	{ id: "card", label: "Card fill", group: "Color", kind: "color", def: "#150d29", cssVar: "--lcx-card" },
+	{ id: "text", label: "Text", group: "Color", kind: "color", def: "#f3ecff", cssVar: "--lcx-text" },
+	{ id: "textMuted", label: "Text (muted)", group: "Color", kind: "color", def: "#b7a9d9", cssVar: "--lcx-text-muted" },
+	{ id: "textFaint", label: "Text (faint)", group: "Color", kind: "color", def: "#8574ad", cssVar: "--lcx-text-faint" },
+	{ id: "gold", label: "Momentum gold", group: "Color", kind: "color", def: "#fbbf24", cssVar: "--lcx-gold", help: "Momentum card, milestone \u201cdone\u201d treatment \u2014 the achievement/pride register, matching Habit Tracker\u2019s streak gold." },
+	{ id: "goldBright", label: "Momentum gold (bright)", group: "Color", kind: "color", def: "#fde68a", cssVar: "--lcx-gold-bright" },
+	{ id: "borderStrength", label: "Border strength", group: "Color", kind: "range", def: "30", cssVar: "--lcx-border-pct", min: 0, max: 100, step: 5, unit: "%", help: "How much accent shows in card outlines." },
+	{ id: "green", label: "Success green", group: "Color", kind: "color", def: "#34d399", cssVar: "--lcx-green", help: "Goal status: Done." },
+	{ id: "greenBright", label: "Success green (bright)", group: "Color", kind: "color", def: "#4ade80", cssVar: "--lcx-green-bright" },
+	{ id: "red", label: "Alert red", group: "Color", kind: "color", def: "#f87171", cssVar: "--lcx-red", help: "Goal status: Missed." },
+
+	// ---- Type ----
+	{ id: "fontDisplay", label: "Display face", group: "Type", kind: "font", def: TWEAK_FONT_STACKS[0].value, cssVar: "--lcx-font-display", options: TWEAK_FONT_STACKS, help: "Card titles, the Priority line, big numbers." },
+	{ id: "fontBody", label: "Body face", group: "Type", kind: "font", def: TWEAK_FONT_STACKS[1].value, cssVar: "--lcx-font-body", options: TWEAK_FONT_STACKS },
+	{ id: "rootSize", label: "Overall scale", group: "Type", kind: "range", def: "1", cssVar: "--lcx-root-size", min: 0.8, max: 1.6, step: 0.05, unit: "em", help: "Scales the whole pane at once." },
+	{ id: "tracking", label: "Label letter-spacing", group: "Type", kind: "range", def: "0.03", cssVar: "--lcx-tracking", min: -0.02, max: 0.3, step: 0.01, unit: "em", help: "Affects uppercase field labels like VISION and MOMENTUM." },
+
+	// ---- Shape ----
+	{ id: "radius", label: "Corner radius", group: "Shape", kind: "range", def: "12", cssVar: "--lcx-radius-base", min: 0, max: 28, step: 1, unit: "px", help: "Scales every rounded corner together." },
+	{ id: "cardPadding", label: "Card padding", group: "Shape", kind: "range", def: "16", cssVar: "--lcx-card-pad", min: 6, max: 44, step: 1, unit: "px" },
+	{ id: "cardGap", label: "Gap between cards", group: "Shape", kind: "range", def: "14", cssVar: "--lcx-card-gap", min: 0, max: 48, step: 1, unit: "px" },
+	{ id: "hairline", label: "Outline weight", group: "Shape", kind: "range", def: "1", cssVar: "--lcx-hairline", min: 1, max: 4, step: 1, unit: "px" },
+
+	// ---- Effects ----
+	{ id: "glow", label: "Glow strength", group: "Effects", kind: "range", def: "100", cssVar: "--lcx-glow-pct", min: 0, max: 250, step: 10, unit: "%", help: "0 turns every neon bloom off." },
+	{ id: "shadow", label: "Shadow depth", group: "Effects", kind: "range", def: "100", cssVar: "--lcx-shadow-pct", min: 0, max: 250, step: 10, unit: "%" },
+	{ id: "motion", label: "Motion speed", group: "Effects", kind: "range", def: "100", cssVar: "--lcx-motion-pct", min: 0, max: 300, step: 10, unit: "%", help: "0 stops animation. Your OS reduced-motion setting still overrides this." },
+	{ id: "hoverLift", label: "Cards lift on hover", group: "Effects", kind: "toggle", def: "on", bodyClass: "lc-no-hover-lift" },
+	{ id: "panelWash", label: "Panel background wash", group: "Effects", kind: "toggle", def: "on", bodyClass: "lc-no-panel-wash", help: "The soft radial haze behind the pane." },
+];
+
+const TWEAK_GROUPS = ["Color", "Type", "Shape", "Effects"];
+
+interface CopyDef {
+	id: string;
+	label: string;
+	group: string;
+	def: string;
+	vars?: string[];
+	multiline?: boolean;
+	help?: string;
+}
+
+const COPY_GROUP_OVERVIEW = "Text \u00b7 Overview";
+const COPY_GROUP_GOALS = "Text \u00b7 Goals";
+
+// Editable strings for the pilot (Overview) pass. Extends to the other
+// tabs as they get their own restyle — same sparse-storage rule as the
+// tweaks above: only ids present in designCopy differ from shipped text.
+const COPY_SPEC: CopyDef[] = [
+	{ id: "overview.visionLabel", label: "Vision card header", group: COPY_GROUP_OVERVIEW, def: "\ud83c\udfaf Vision" },
+	{ id: "overview.visionNudgeLabel", label: "Vision nudge header", group: COPY_GROUP_OVERVIEW, def: "\u270d\ufe0f Vision still needs writing" },
+	{ id: "overview.quarterLabel", label: "Quarter card header", group: COPY_GROUP_OVERVIEW, def: "\ud83d\udcc5 Current Quarter" },
+	{ id: "overview.noActiveQuarter", label: "No active quarter", group: COPY_GROUP_OVERVIEW, def: "No active quarter." },
+	{ id: "overview.goalsLabel", label: "Goals card header", group: COPY_GROUP_OVERVIEW, def: "\ud83d\ude80 Goals" },
+	{ id: "overview.momentumLabel", label: "Momentum card header", group: COPY_GROUP_OVERVIEW, def: "\ud83c\udf1f Momentum" },
+
+	{ id: "goals.addButton", label: "Add-goal button", group: COPY_GROUP_GOALS, def: "+ Add Goal" },
+	{ id: "goals.emptyState", label: "No goals at all", group: COPY_GROUP_GOALS, def: "No goals yet \u2014 add your first one above." },
+	{ id: "goals.emptyActiveState", label: "No active goals", group: COPY_GROUP_GOALS, def: "No active goals \u2014 add one above, or restore one from Archived Goals below." },
+	{ id: "goals.systemLabel", label: "Supporting-habits header", group: COPY_GROUP_GOALS, def: "Goal Supporting Habits" },
+	{ id: "goals.systemEmpty", label: "No linked habits", group: COPY_GROUP_GOALS, def: "No linked habits yet" },
+];
+
+const COPY_GROUPS = [COPY_GROUP_OVERVIEW, COPY_GROUP_GOALS];
+// Plain loop rather than Object.fromEntries: this build targets ES2018.
+const COPY_BY_ID: Record<string, CopyDef> = {};
+for (const c of COPY_SPEC) {
+	COPY_BY_ID[c.id] = c;
+}
+
+function copyText(overrides: Record<string, string>, id: string, vars?: Record<string, string | number>): string {
+	const def = COPY_BY_ID[id];
+	if (!def) return "";
+	const raw = overrides[id] !== undefined && overrides[id] !== "" ? overrides[id] : def.def;
+	if (!vars) return raw;
+	return raw.replace(/\{(\w+)\}/g, (whole, key) => (key in vars ? String(vars[key]) : whole));
+}
+
+function tweakValue(tweaks: Record<string, string>, id: string): string {
+	const def = LC_TWEAK_SPEC.find((t) => t.id === id);
+	if (!def) return "";
+	const raw = tweaks[id];
+	return raw === undefined || raw === "" ? def.def : raw;
+}
+
+// Pushes the whole tweak set onto a root element as inline custom
+// properties plus structural classes. Called on every render() and on
+// every live-preview edit inside the panel.
+function applyTweaksTo(el: HTMLElement, tweaks: Record<string, string>) {
+	for (const def of LC_TWEAK_SPEC) {
+		const value = tweakValue(tweaks, def.id);
+		if (def.cssVar) {
+			el.style.setProperty(def.cssVar, def.unit && def.kind === "range" ? `${value}${def.unit}` : value);
+		}
+		if (!def.bodyClass) continue;
+		if (def.kind === "toggle") {
+			el.toggleClass(def.bodyClass, value !== "on");
+		} else if (def.kind === "select") {
+			(def.options ?? []).forEach((opt) => el.toggleClass(`${def.bodyClass}-${opt.value}`, value === opt.value));
+		}
+	}
+}
+
 interface PluginSettings {
 	supabaseUrl: string;
 	supabaseAnonKey: string;
 	lastDigestShownDate?: string; // YYYY-MM-DD — guards the weekly digest modal from re-showing more than once per day
+	// Design Tweaks overrides — sparse maps, only entries that differ from
+	// LC_TWEAK_SPEC/COPY_SPEC's shipped defaults are ever stored. See the
+	// Design Tweaks section above.
+	designTweaks: Record<string, string>;
+	designCopy: Record<string, string>;
 }
 
-const DEFAULT_SETTINGS: PluginSettings = { supabaseUrl: "", supabaseAnonKey: "" };
+const DEFAULT_SETTINGS: PluginSettings = { supabaseUrl: "", supabaseAnonKey: "", designTweaks: {}, designCopy: {} };
 
 function uid(prefix: string): string {
 	return `${prefix}-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
@@ -747,6 +898,363 @@ class ConfirmMigrationModal extends Modal {
 
 // ---- Settings tab ----
 
+// Ported from Habit Tracker's own TweakPanel — same draft/live-preview/
+// save/reset shape, retargeted at .lc-view-root and LifeCompassPlugin's
+// own refreshMainViewOnly(). See the Design Tweaks section above for what
+// isn't ported (the knobs/copy don't exist yet for tabs this pass doesn't
+// touch).
+class LcTweakPanel {
+	plugin: LifeCompassPlugin;
+	el: HTMLElement;
+	draft: Record<string, string>;
+	copyDraft: Record<string, string>;
+	private onKeydown: (e: KeyboardEvent) => void;
+	private static openInstance: LcTweakPanel | null = null;
+	private savedCopySnapshot: Record<string, string>;
+
+	constructor(plugin: LifeCompassPlugin) {
+		this.plugin = plugin;
+		this.draft = { ...plugin.settings.designTweaks };
+		this.copyDraft = { ...plugin.settings.designCopy };
+		this.savedCopySnapshot = { ...plugin.settings.designCopy };
+	}
+
+	static toggle(plugin: LifeCompassPlugin) {
+		if (LcTweakPanel.openInstance) {
+			LcTweakPanel.openInstance.close();
+			return;
+		}
+		const panel = new LcTweakPanel(plugin);
+		LcTweakPanel.openInstance = panel;
+		panel.open();
+	}
+
+	open() {
+		this.el = document.body.createDiv({ cls: "lc-tweak-panel" });
+		this.renderHeader();
+		const body = this.el.createDiv({ cls: "lc-tweak-body" });
+		TWEAK_GROUPS.forEach((group, i) => this.renderGroup(body, group, i === 0));
+		COPY_GROUPS.forEach((group) => this.renderCopyGroup(body, group));
+		this.renderFooter();
+		this.makeDraggable();
+		this.onKeydown = (e: KeyboardEvent) => {
+			if (e.key === "Escape") this.close();
+		};
+		document.addEventListener("keydown", this.onKeydown);
+	}
+
+	close() {
+		document.removeEventListener("keydown", this.onKeydown);
+		this.el?.remove();
+		if (LcTweakPanel.openInstance === this) LcTweakPanel.openInstance = null;
+		this.plugin.settings.designCopy = { ...this.savedCopySnapshot };
+		this.plugin.refreshMainViewOnly();
+	}
+
+	private applyLive() {
+		document.querySelectorAll<HTMLElement>(".lc-view-root").forEach((root) => applyTweaksTo(root, this.draft));
+	}
+
+	private set(id: string, value: string) {
+		const def = LC_TWEAK_SPEC.find((t) => t.id === id);
+		if (def && value === def.def) delete this.draft[id];
+		else this.draft[id] = value;
+		this.applyLive();
+		this.refreshChangedCount();
+	}
+
+	private changedCount(): number {
+		const tweaks = LC_TWEAK_SPEC.filter((t) => this.draft[t.id] !== undefined && this.draft[t.id] !== t.def).length;
+		const copy = COPY_SPEC.filter((c) => this.copyDraft[c.id] !== undefined && this.copyDraft[c.id] !== c.def).length;
+		return tweaks + copy;
+	}
+
+	private countEl: HTMLElement;
+
+	private refreshChangedCount() {
+		if (!this.countEl) return;
+		const n = this.changedCount();
+		this.countEl.setText(n === 0 ? "matching shipped defaults" : `${n} change${n === 1 ? "" : "s"} from default`);
+		this.countEl.toggleClass("lc-tweak-count-dirty", n > 0);
+	}
+
+	private renderHeader() {
+		const header = this.el.createDiv({ cls: "lc-tweak-header" });
+		const titleWrap = header.createDiv({ cls: "lc-tweak-title-wrap" });
+		titleWrap.createDiv({ cls: "lc-tweak-title", text: "Design Tweaks" });
+		this.countEl = titleWrap.createDiv({ cls: "lc-tweak-count" });
+		const closeBtn = header.createEl("button", { cls: "lc-tweak-close", text: "✕" });
+		closeBtn.setAttr("aria-label", "Close Design Tweaks");
+		closeBtn.onclick = () => this.close();
+		this.refreshChangedCount();
+	}
+
+	private renderGroup(parent: HTMLElement, group: string, startOpen: boolean) {
+		const section = parent.createDiv({ cls: "lc-tweak-section" });
+		const head = section.createDiv({ cls: "lc-tweak-section-head" });
+		head.setAttr("tabindex", "0");
+		head.setAttr("role", "button");
+		const caret = head.createSpan({ cls: "lc-tweak-caret", text: startOpen ? "▾" : "▸" });
+		head.createSpan({ text: group });
+		const content = section.createDiv({ cls: "lc-tweak-section-body" });
+		if (!startOpen) content.addClass("lc-tweak-hidden");
+		const toggle = () => {
+			const nowHidden = content.hasClass("lc-tweak-hidden");
+			content.toggleClass("lc-tweak-hidden", !nowHidden);
+			caret.setText(nowHidden ? "▾" : "▸");
+			head.setAttr("aria-expanded", nowHidden ? "true" : "false");
+		};
+		head.onclick = toggle;
+		head.addEventListener("keydown", (e: KeyboardEvent) => {
+			if (e.key === "Enter" || e.key === " ") {
+				e.preventDefault();
+				toggle();
+			}
+		});
+		head.setAttr("aria-expanded", startOpen ? "true" : "false");
+
+		LC_TWEAK_SPEC.filter((t) => t.group === group).forEach((def) => this.renderControl(content, def));
+	}
+
+	private renderCopyGroup(parent: HTMLElement, group: string) {
+		const section = parent.createDiv({ cls: "lc-tweak-section" });
+		const head = section.createDiv({ cls: "lc-tweak-section-head" });
+		head.setAttr("tabindex", "0");
+		head.setAttr("role", "button");
+		head.setAttr("aria-expanded", "false");
+		const caret = head.createSpan({ cls: "lc-tweak-caret", text: "▸" });
+		head.createSpan({ text: group });
+		const content = section.createDiv({ cls: "lc-tweak-section-body lc-tweak-hidden" });
+		const toggle = () => {
+			const nowHidden = content.hasClass("lc-tweak-hidden");
+			content.toggleClass("lc-tweak-hidden", !nowHidden);
+			caret.setText(nowHidden ? "▾" : "▸");
+			head.setAttr("aria-expanded", nowHidden ? "true" : "false");
+		};
+		head.onclick = toggle;
+		head.addEventListener("keydown", (e: KeyboardEvent) => {
+			if (e.key === "Enter" || e.key === " ") {
+				e.preventDefault();
+				toggle();
+			}
+		});
+		COPY_SPEC.filter((c) => c.group === group).forEach((def) => this.renderCopyControl(content, def));
+	}
+
+	private renderCopyControl(parent: HTMLElement, def: CopyDef) {
+		const row = parent.createDiv({ cls: "lc-tweak-row lc-tweak-row-copy" });
+		const labelRow = row.createDiv({ cls: "lc-tweak-copy-labelrow" });
+		labelRow.createSpan({ cls: "lc-tweak-label", text: def.label });
+		if (def.vars?.length) {
+			labelRow.createSpan({ cls: "lc-tweak-vars", text: def.vars.map((v) => `{${v}}`).join(" ") });
+		}
+		if (def.help) labelRow.setAttr("title", def.help);
+
+		const current = copyText(this.copyDraft, def.id);
+		const input = def.multiline
+			? row.createEl("textarea", { cls: "lc-tweak-textarea" })
+			: row.createEl("input", { cls: "lc-tweak-text", type: "text" });
+		input.value = current;
+		if (def.multiline) (input as HTMLTextAreaElement).rows = Math.min(6, Math.ceil(current.length / 46) + 1);
+
+		const commit = () => {
+			const v = input.value;
+			if (v === def.def || v.trim() === "") {
+				delete this.copyDraft[def.id];
+				if (v.trim() === "") input.value = def.def;
+			} else {
+				this.copyDraft[def.id] = v;
+			}
+			this.applyCopyLive();
+			this.refreshChangedCount();
+		};
+		input.addEventListener("change", commit);
+		input.addEventListener("blur", commit);
+	}
+
+	private applyCopyLive() {
+		this.plugin.settings.designCopy = { ...this.copyDraft };
+		this.plugin.refreshMainViewOnly();
+	}
+
+	private renderControl(parent: HTMLElement, def: TweakDef) {
+		const row = parent.createDiv({ cls: "lc-tweak-row" });
+		const labelWrap = row.createDiv({ cls: "lc-tweak-label-wrap" });
+		const label = labelWrap.createDiv({ cls: "lc-tweak-label", text: def.label });
+		if (def.help) label.setAttr("title", def.help);
+		const valueEl = labelWrap.createDiv({ cls: "lc-tweak-value" });
+		const control = row.createDiv({ cls: "lc-tweak-control" });
+		const current = tweakValue(this.draft, def.id);
+
+		const markValue = (v: string) => {
+			if (def.kind === "range") valueEl.setText(`${v}${def.unit ?? ""}`);
+			else if (def.kind === "toggle") valueEl.setText(v === "on" ? "on" : "off");
+			else if (def.kind === "color") valueEl.setText(v);
+			else valueEl.setText("");
+		};
+		markValue(current);
+
+		if (def.kind === "color") {
+			const swatch = control.createEl("input", { cls: "lc-tweak-color", type: "color" });
+			swatch.value = current;
+			const hex = control.createEl("input", { cls: "lc-tweak-hex", type: "text" });
+			hex.value = current;
+			swatch.addEventListener("input", () => {
+				hex.value = swatch.value;
+				markValue(swatch.value);
+				this.set(def.id, swatch.value);
+			});
+			hex.addEventListener("change", () => {
+				if (!/^#[0-9a-fA-F]{6}$/.test(hex.value.trim())) {
+					hex.value = tweakValue(this.draft, def.id);
+					return;
+				}
+				swatch.value = hex.value.trim();
+				markValue(hex.value.trim());
+				this.set(def.id, hex.value.trim());
+			});
+		} else if (def.kind === "range") {
+			const slider = control.createEl("input", { cls: "lc-tweak-range", type: "range" });
+			slider.min = String(def.min ?? 0);
+			slider.max = String(def.max ?? 100);
+			slider.step = String(def.step ?? 1);
+			slider.value = current;
+			slider.addEventListener("input", () => {
+				markValue(slider.value);
+				this.set(def.id, slider.value);
+			});
+		} else if (def.kind === "toggle") {
+			const btn = control.createEl("button", { cls: "lc-tweak-toggle" });
+			const paint = (v: string) => {
+				btn.toggleClass("lc-tweak-toggle-on", v === "on");
+				btn.setText(v === "on" ? "On" : "Off");
+				btn.setAttr("aria-pressed", v === "on" ? "true" : "false");
+			};
+			paint(current);
+			btn.onclick = () => {
+				const next = tweakValue(this.draft, def.id) === "on" ? "off" : "on";
+				paint(next);
+				markValue(next);
+				this.set(def.id, next);
+			};
+		} else {
+			const sel = control.createEl("select", { cls: "lc-tweak-select" });
+			(def.options ?? []).forEach((opt) => {
+				const o = sel.createEl("option", { text: opt.label });
+				o.value = opt.value;
+			});
+			sel.value = current;
+			if (def.kind === "font") sel.style.fontFamily = current;
+			sel.addEventListener("change", () => {
+				if (def.kind === "font") sel.style.fontFamily = sel.value;
+				this.set(def.id, sel.value);
+			});
+		}
+	}
+
+	private renderFooter() {
+		const footer = this.el.createDiv({ cls: "lc-tweak-footer" });
+
+		const saveBtn = footer.createEl("button", { cls: "lc-tweak-btn lc-tweak-btn-cta", text: "Save" });
+		saveBtn.onclick = async () => {
+			this.plugin.settings.designTweaks = { ...this.draft };
+			this.plugin.settings.designCopy = { ...this.copyDraft };
+			this.savedCopySnapshot = { ...this.copyDraft };
+			await this.plugin.persist();
+			this.plugin.refreshMainViewOnly();
+			new Notice(`Design saved — ${this.changedCount()} tweak(s) applied.`);
+		};
+
+		const copyBtn = footer.createEl("button", { cls: "lc-tweak-btn", text: "Copy CSS" });
+		copyBtn.onclick = async () => {
+			const css = this.exportCss();
+			await navigator.clipboard.writeText(css);
+			new Notice("CSS copied — paste it into styles.css to make it the default.");
+		};
+
+		const resetBtn = footer.createEl("button", { cls: "lc-tweak-btn lc-tweak-btn-warn", text: "Reset" });
+		resetBtn.onclick = () => {
+			this.draft = {};
+			this.copyDraft = {};
+			this.applyLive();
+			this.applyCopyLive();
+			this.el.empty();
+			this.renderHeader();
+			const body = this.el.createDiv({ cls: "lc-tweak-body" });
+			TWEAK_GROUPS.forEach((g, i) => this.renderGroup(body, g, i === 0));
+			COPY_GROUPS.forEach((g) => this.renderCopyGroup(body, g));
+			this.renderFooter();
+			new Notice("Reverted to shipped defaults (not saved yet).");
+		};
+	}
+
+	private exportCss(): string {
+		const vars: string[] = [];
+		const classes: string[] = [];
+		for (const def of LC_TWEAK_SPEC) {
+			const v = this.draft[def.id];
+			if (v === undefined || v === def.def) continue;
+			if (def.cssVar) {
+				vars.push(`\t${def.cssVar}: ${v}${def.unit && def.kind === "range" ? def.unit : ""};`);
+			} else if (def.bodyClass) {
+				classes.push(
+					def.kind === "toggle"
+						? `${def.label}: ${v} → class .${def.bodyClass}`
+						: `${def.label}: ${v} → class .${def.bodyClass}-${v}`
+				);
+			}
+		}
+		const copyLines: string[] = [];
+		for (const def of COPY_SPEC) {
+			const v = this.copyDraft[def.id];
+			if (v === undefined || v === def.def) continue;
+			copyLines.push(`\t{ id: "${def.id}", def: ${JSON.stringify(v)} },`);
+		}
+		if (!vars.length && !classes.length && !copyLines.length) return "/* No changes from the shipped design. */";
+		let out = "";
+		if (vars.length) out += `.lc-view-root {\n${vars.join("\n")}\n}\n`;
+		if (classes.length) out += `\n/* Structural tweaks (applied as classes by applyTweaksTo):\n${classes.map((c) => `   ${c}`).join("\n")}\n*/\n`;
+		if (copyLines.length) out += `\n/* Copy overrides — paste these \`def\` values into COPY_SPEC in main.ts:\n${copyLines.join("\n")}\n*/\n`;
+		return out;
+	}
+
+	private makeDraggable() {
+		const header = this.el.querySelector<HTMLElement>(".lc-tweak-header");
+		if (!header) return;
+		let startX = 0;
+		let startY = 0;
+		let originLeft = 0;
+		let originTop = 0;
+		let dragging = false;
+
+		const onMove = (e: MouseEvent) => {
+			if (!dragging) return;
+			const maxLeft = window.innerWidth - 80;
+			const maxTop = window.innerHeight - 40;
+			this.el.style.left = `${Math.min(Math.max(originLeft + e.clientX - startX, -240), maxLeft)}px`;
+			this.el.style.top = `${Math.min(Math.max(originTop + e.clientY - startY, 0), maxTop)}px`;
+			this.el.style.right = "auto";
+		};
+		const onUp = () => {
+			dragging = false;
+			document.removeEventListener("mousemove", onMove);
+			document.removeEventListener("mouseup", onUp);
+		};
+		header.addEventListener("mousedown", (e: MouseEvent) => {
+			if ((e.target as HTMLElement).closest("button")) return;
+			dragging = true;
+			startX = e.clientX;
+			startY = e.clientY;
+			const rect = this.el.getBoundingClientRect();
+			originLeft = rect.left;
+			originTop = rect.top;
+			document.addEventListener("mousemove", onMove);
+			document.addEventListener("mouseup", onUp);
+			e.preventDefault();
+		});
+	}
+}
+
 class LifeCompassSettingTab extends PluginSettingTab {
 	plugin: LifeCompassPlugin;
 	email = "";
@@ -954,6 +1462,11 @@ class LifeCompassView extends ItemView {
 		const root = this.contentEl;
 		root.empty();
 		root.addClass("lc-view-root");
+		// Design Tweaks land here as inline custom properties, same pattern
+		// as Habit Tracker's own applyTweaksTo — re-applied on every render
+		// so a saved tweak reshapes the pane every time it redraws, not just
+		// once at load.
+		applyTweaksTo(root, this.plugin.settings.designTweaks);
 
 		const tabRow = root.createDiv({ cls: "lc-tab-row" });
 		const tabs: { id: Tab; label: string }[] = [
@@ -1075,7 +1588,7 @@ class LifeCompassView extends ItemView {
 			this.activeTab = "vision";
 			this.render();
 		});
-		visionCard.createDiv({ text: "🎯 Vision", cls: "lc-field-label" });
+		visionCard.createDiv({ text: copyText(this.plugin.settings.designCopy, "overview.visionLabel"), cls: "lc-field-label" });
 		visionCard.createDiv({
 			text: ratings.length ? `Average satisfaction: ${avgRating} / 10 across ${ratings.length} rated categories` : "No categories rated yet.",
 			cls: "lc-outcome-metric",
@@ -1086,7 +1599,7 @@ class LifeCompassView extends ItemView {
 		);
 		if (missingVision.length) {
 			const nudge = body.createDiv({ cls: "lc-overview-card lc-vision-nudge" });
-			nudge.createDiv({ text: "✍️ Vision still needs writing", cls: "lc-field-label" });
+			nudge.createDiv({ text: copyText(this.plugin.settings.designCopy, "overview.visionNudgeLabel"), cls: "lc-field-label" });
 			nudge.createDiv({
 				text: `${missingVision.length} of ${this.plugin.data.categories.length} categories have a rating but no Purpose or Vivid-Future written yet. Numbers alone aren't a vision.`,
 				cls: "lc-outcome-metric",
@@ -1108,7 +1621,7 @@ class LifeCompassView extends ItemView {
 			this.activeTab = "quarter";
 			this.render();
 		});
-		quarterCard.createDiv({ text: "📅 Current Quarter", cls: "lc-field-label" });
+		quarterCard.createDiv({ text: copyText(this.plugin.settings.designCopy, "overview.quarterLabel"), cls: "lc-field-label" });
 		if (current) {
 			quarterCard.createDiv({ text: current.id, cls: "lc-outcome-title" });
 			// The Priority is the single most important sentence in the app —
@@ -1118,7 +1631,7 @@ class LifeCompassView extends ItemView {
 			if (current.priority) quarterCard.createDiv({ text: current.priority, cls: "lc-overview-priority" });
 			if (current.deadline) quarterCard.createDiv({ text: daysUntil(current.deadline), cls: "lc-outcome-deadline" });
 		} else {
-			quarterCard.createDiv({ text: "No active quarter.", cls: "lc-outcomes-empty" });
+			quarterCard.createDiv({ text: copyText(this.plugin.settings.designCopy, "overview.noActiveQuarter"), cls: "lc-outcomes-empty" });
 		}
 
 		const outcomes = this.plugin.data.outcomes.filter((o) => !o.archived);
@@ -1127,7 +1640,7 @@ class LifeCompassView extends ItemView {
 			this.activeTab = "outcomes";
 			this.render();
 		});
-		outcomesCard.createDiv({ text: "🚀 Goals", cls: "lc-field-label" });
+		outcomesCard.createDiv({ text: copyText(this.plugin.settings.designCopy, "overview.goalsLabel"), cls: "lc-field-label" });
 		const active = outcomes.filter((o) => o.status === "active").length;
 		const done = outcomes.filter((o) => o.status === "done").length;
 		outcomesCard.createDiv({ text: `${active} active, ${done} done, ${outcomes.length} total`, cls: "lc-outcome-metric" });
@@ -1168,7 +1681,7 @@ class LifeCompassView extends ItemView {
 		const hasMomentum = topStreaks.length > 0 || (current && milestoneProgress(current).done > 0) || (current && checkinStreak(current) > 0) || ratingDeltas.length > 0;
 		if (hasMomentum) {
 			const momentumCard = body.createDiv({ cls: "lc-overview-card lc-momentum-card" });
-			momentumCard.createDiv({ text: "🌟 Momentum", cls: "lc-field-label" });
+			momentumCard.createDiv({ text: copyText(this.plugin.settings.designCopy, "overview.momentumLabel"), cls: "lc-field-label" });
 			for (const s of topStreaks) {
 				momentumCard.createDiv({ text: `🔥 ${s.streak}-day streak on ${s.name}`, cls: "lc-momentum-line" });
 			}
@@ -1518,12 +2031,12 @@ class LifeCompassView extends ItemView {
 	renderOutcomes(body: HTMLElement) {
 		body.addClass("lc-outcomes-root");
 
-		const addBtn = body.createEl("button", { text: "+ Add Goal", cls: "lc-add-btn" });
+		const addBtn = body.createEl("button", { text: copyText(this.plugin.settings.designCopy, "goals.addButton"), cls: "lc-add-btn" });
 		addBtn.type = "button";
 		addBtn.onclick = () => new OutcomeFormModal(this.plugin, null, () => this.render()).open();
 
 		if (this.plugin.data.outcomes.length === 0) {
-			body.createDiv({ text: "No goals yet — add your first one above.", cls: "lc-outcomes-empty" });
+			body.createDiv({ text: copyText(this.plugin.settings.designCopy, "goals.emptyState"), cls: "lc-outcomes-empty" });
 			return;
 		}
 
@@ -1532,7 +2045,7 @@ class LifeCompassView extends ItemView {
 		const archived = this.plugin.data.outcomes.filter((o) => o.archived);
 
 		if (active.length === 0) {
-			body.createDiv({ text: "No active goals — add one above, or restore one from Archived Goals below.", cls: "lc-outcomes-empty" });
+			body.createDiv({ text: copyText(this.plugin.settings.designCopy, "goals.emptyActiveState"), cls: "lc-outcomes-empty" });
 		} else {
 			const grid = body.createDiv({ cls: "lc-outcomes-grid" });
 			for (const outcome of active) this.renderOutcomeCard(grid, outcome, habits, false);
@@ -1599,7 +2112,7 @@ class LifeCompassView extends ItemView {
 
 		if (linkedHabits.length) {
 			const systemEl = card.createDiv({ cls: "lc-outcome-system" });
-			systemEl.createDiv({ text: "Goal Supporting Habits", cls: "lc-outcome-system-label" });
+			systemEl.createDiv({ text: copyText(this.plugin.settings.designCopy, "goals.systemLabel"), cls: "lc-outcome-system-label" });
 			for (const h of linkedHabits) {
 				const row = systemEl.createDiv({ cls: "lc-outcome-habit-row" });
 				const dot = row.createSpan({ cls: "lc-outcome-habit-dot" });
@@ -1608,7 +2121,7 @@ class LifeCompassView extends ItemView {
 				row.createSpan({ text: `🔥 ${getHabitStreak(this.plugin.app, h.id)}`, cls: "lc-outcome-habit-streak" });
 			}
 		} else if (habits) {
-			card.createDiv({ text: "No linked habits yet", cls: "lc-outcome-system-empty" });
+			card.createDiv({ text: copyText(this.plugin.settings.designCopy, "goals.systemEmpty"), cls: "lc-outcome-system-empty" });
 		}
 
 		const actions = card.createDiv({ cls: "lc-outcome-actions" });
@@ -2161,6 +2674,7 @@ class OutcomeFormModal extends Modal {
 	onOpen() {
 		const { contentEl } = this;
 		contentEl.addClass("lc-modal");
+		contentEl.addClass("lc-outcome-modal");
 		contentEl.createEl("h3", { text: this.existing ? "Edit Goal" : "New Goal" });
 
 		new Setting(contentEl).setName("Name").addText((t) => t.setValue(this.values.name).onChange((v) => (this.values.name = v)));
@@ -2641,6 +3155,11 @@ export default class LifeCompassPlugin extends Plugin {
 			id: "import-goals-notes",
 			name: "Import from Goals/ notes and clean up",
 			callback: () => this.runMigration(),
+		});
+		this.addCommand({
+			id: "design-tweaks",
+			name: "Design Tweaks (live theme editor)",
+			callback: () => LcTweakPanel.toggle(this),
 		});
 		this.registerMarkdownCodeBlockProcessor("life-compass-daily", (_source, el, ctx) => {
 			const block = new DailyQuarterBlock(el, this);

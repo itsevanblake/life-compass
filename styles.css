@@ -15,45 +15,638 @@ body.theme-dark {
 	--lc-shadow-md: 0 8px 24px rgba(0, 0, 0, 0.55);
 }
 
-/* ---- View shell ---- */
-
+/* ---- Neon arcade identity (pilot: Overview tab) ----
+   Same deliberate choice as Habit Tracker: a fixed dark violet/gold
+   palette rather than Obsidian's own theme variables, so this pane reads
+   as one continuous product with Habit Tracker regardless of which
+   Obsidian theme is active. Scoped under .lc-view-root only — never
+   leaks into the rest of Obsidian's chrome. Overridable per-value via the
+   Design Tweaks panel (LC_TWEAK_SPEC in main.ts writes these same custom
+   properties inline onto .lc-view-root, same applyTweaksTo mechanism as
+   Habit Tracker). Tabs beyond Overview still render with these tokens
+   applied to the shared shell (tab row, pane background), but their own
+   tab-specific content isn't restyled yet — see main.ts's Design Tweaks
+   comment for what this pilot pass does and doesn't cover. */
 .lc-view-root {
+	--lcx-bg: #0a0713;
+	--lcx-bg-2: #120a24;
+	--lcx-glow-violet: #a855f7;
+	--lcx-glow-violet-bright: #c084fc;
+	--lcx-violet-soft: #6d28d9;
+	--lcx-gold: #fbbf24;
+	--lcx-gold-bright: #fde68a;
+	--lcx-green: #34d399;
+	--lcx-green-bright: #4ade80;
+	--lcx-red: #f87171;
+	--lcx-card: #150d29;
+	--lcx-text: #f3ecff;
+	--lcx-text-muted: #b7a9d9;
+	--lcx-text-faint: #8574ad;
+	--lcx-font-display: "Bahnschrift", "Avenir Next Condensed", "Futura", "Segoe UI", system-ui, sans-serif;
+	--lcx-font-body: "DM Sans", "Segoe UI", system-ui, sans-serif;
+
+	/* Design Tweaks knobs — see LC_TWEAK_SPEC. Declared here so the
+	   shipped design works untouched and each knob has one documented
+	   default; keep in sync with each TweakDef's `def`. */
+	--lcx-border-pct: 30%;
+	--lcx-glow-pct: 100%;
+	--lcx-shadow-pct: 100%;
+	--lcx-motion-pct: 100%;
+	--lcx-root-size: 1em;
+	--lcx-tracking: 0.03em;
+	--lcx-radius-base: 12px;
+	--lcx-card-pad: 16px;
+	--lcx-card-gap: 14px;
+	--lcx-hairline: 1px;
+
+	/* Derived from the knobs above. */
+	--lcx-card-border: color-mix(in srgb, var(--lcx-glow-violet) var(--lcx-border-pct), transparent);
+	--lcx-glow-a: calc(var(--lcx-glow-pct) * 0.55);
+	--lcx-shadow-a: calc(var(--lcx-shadow-pct) * 0.45);
+	--lcx-dur-fast: calc(120ms * 100 / max(var(--lcx-motion-pct), 1));
+	--lcx-dur-mid: calc(280ms * 100 / max(var(--lcx-motion-pct), 1));
+	--lcx-radius-sm: calc(var(--lcx-radius-base) * 0.34);
+	--lcx-radius-md-x: calc(var(--lcx-radius-base) * 0.5);
+	--lcx-radius-lg-x: calc(var(--lcx-radius-base) * 0.84);
+	--lcx-radius-xl-x: var(--lcx-radius-base);
+
+	position: relative;
 	padding: var(--lc-space-4);
 	max-width: 900px;
 	margin: 0 auto;
+	font-size: var(--lcx-root-size);
+	font-family: var(--lcx-font-body);
+	/* Deliberately NOT setting color here. `color` is inherited, and every
+	   tab shares this one .lc-view-root — a text color set here would
+	   cascade into whichever tab is active, restyled or not. An unrestyled
+	   tab's cards still use Obsidian's own (possibly light) theme
+	   background, so inheriting --lcx-text (near-white) onto them would be
+	   invisible text, not just an inconsistent look. Each restyled tab's
+	   own root class (.lc-overview-root today) sets --lcx-text explicitly
+	   on exactly the elements it actually restyles instead. An unrestyled
+	   tab keeps inheriting Obsidian's real --text-normal from further up
+	   the DOM, which is correct for whatever theme is active. */
+	font-variant-numeric: tabular-nums;
+	background:
+		radial-gradient(ellipse 700px 500px at 100% 0%, color-mix(in srgb, var(--lcx-violet-soft) 20%, transparent), transparent 60%),
+		linear-gradient(180deg, var(--lcx-bg-2), var(--lcx-bg) 60%);
+	border-radius: var(--lcx-radius-lg-x);
 }
+
+/* Panel wash off — flat ground, no radial haze behind the cards. */
+.lc-view-root.lc-no-panel-wash {
+	background: linear-gradient(180deg, var(--lcx-bg-2), var(--lcx-bg) 60%);
+}
+
+/* ---- Overview cards ----
+   Consolidated onto the two-accent system (violet + gold) rather than the
+   three competing yellow/amber shades the old design used per-card
+   (#eab308 for the vision nudge, #f59e0b for momentum) — same restraint
+   Habit Tracker applies with its own single streak-gold. */
+
+.lc-overview-card {
+	position: relative;
+	padding: var(--lcx-card-pad);
+	border-radius: var(--lcx-radius-lg-x);
+	background-color: var(--lcx-card);
+	border: var(--lcx-hairline) solid var(--lcx-card-border);
+	box-shadow:
+		inset 0 1px 0 color-mix(in srgb, var(--lcx-glow-violet-bright) 18%, transparent),
+		0 0 calc(18px * var(--lcx-glow-pct) / 100) color-mix(in srgb, var(--lcx-glow-violet) calc(var(--lcx-glow-a) * 0.5%), transparent),
+		0 6px 18px rgba(0, 0, 0, calc(var(--lcx-shadow-a) / 100 * 0.5));
+	margin-bottom: var(--lcx-card-gap);
+	transition: border-color var(--lcx-dur-fast) ease, box-shadow var(--lcx-dur-fast) ease, transform var(--lcx-dur-fast) ease;
+}
+
+.lc-overview-card-clickable {
+	cursor: pointer;
+}
+
+.lc-overview-card-clickable:hover,
+.lc-overview-card-clickable:focus-visible {
+	border-color: var(--lcx-glow-violet);
+	box-shadow:
+		inset 0 1px 0 color-mix(in srgb, var(--lcx-glow-violet-bright) 30%, transparent),
+		0 0 calc(26px * var(--lcx-glow-pct) / 100) color-mix(in srgb, var(--lcx-glow-violet) calc(var(--lcx-glow-a) * 0.8%), transparent),
+		0 8px 22px rgba(0, 0, 0, calc(var(--lcx-shadow-a) / 100 * 0.6));
+}
+
+.lc-view-root:not(.lc-no-hover-lift) .lc-overview-card-clickable:hover {
+	transform: translateY(-1px);
+}
+
+.lc-overview-root .lc-field-label {
+	font-family: var(--lcx-font-display);
+	font-size: 0.72em;
+	font-weight: 700;
+	letter-spacing: var(--lcx-tracking);
+	text-transform: uppercase;
+	color: var(--lcx-text-faint);
+	margin-bottom: 4px;
+}
+
+.lc-overview-root .lc-outcome-metric {
+	font-size: 0.88em;
+	color: var(--lcx-text-muted);
+	margin-bottom: 4px;
+}
+
+.lc-overview-root .lc-outcome-title {
+	font-family: var(--lcx-font-display);
+	font-weight: 700;
+	font-size: 1.05em;
+	color: var(--lcx-text);
+}
+
+.lc-overview-root .lc-outcome-habit-name {
+	color: var(--lcx-text);
+}
+
+.lc-overview-root .lc-outcome-deadline {
+	font-size: 0.8em;
+	color: var(--lcx-text-muted);
+	margin-bottom: 8px;
+}
+
+.lc-overview-root .lc-outcomes-empty {
+	color: var(--lcx-text-faint);
+	font-style: italic;
+	text-align: center;
+	padding: 1.5em 0;
+}
+
+/* The one Wildly Important Goal — real visual weight, matching Habit
+   Tracker's own treatment of its single most important number. */
+.lc-view-root .lc-overview-priority {
+	font-family: var(--lcx-font-display);
+	font-size: 1.2em;
+	font-weight: 700;
+	color: var(--lcx-glow-violet-bright);
+	line-height: 1.35;
+	margin: 4px 0 6px;
+}
+
+.lc-view-root .lc-overview-outcome-row {
+	display: flex;
+	align-items: center;
+	gap: var(--lc-space-3);
+	padding: 4px 0;
+}
+
+.lc-overview-root .lc-progress-track {
+	flex-grow: 1;
+	height: 6px;
+	border-radius: 999px;
+	background-color: color-mix(in srgb, var(--lcx-glow-violet) 15%, var(--lcx-bg-2));
+	overflow: hidden;
+}
+
+.lc-overview-root .lc-progress-bar {
+	height: 100%;
+	border-radius: 999px;
+	background-color: var(--lcx-glow-violet);
+	transition: width var(--lcx-dur-mid) ease;
+}
+
+.lc-overview-root .lc-progress-bar-near-complete {
+	background: linear-gradient(90deg, var(--lcx-glow-violet), var(--lcx-gold));
+}
+
+.lc-overview-root .lc-progress-label {
+	font-size: 0.72em;
+	color: var(--lcx-text-muted);
+	flex-shrink: 0;
+	width: 32px;
+	text-align: right;
+}
+
+/* ---- Vision nudge (gold — a call to action, not an error) ---- */
+
+.lc-view-root .lc-vision-nudge {
+	border-left: 3px solid var(--lcx-gold);
+}
+
+.lc-view-root .lc-vision-nudge-chips {
+	display: flex;
+	flex-wrap: wrap;
+	gap: 6px;
+	margin-top: 8px;
+}
+
+.lc-view-root .lc-vision-nudge-chip {
+	font-size: 0.8em;
+	padding: 3px 10px;
+	border-radius: 999px;
+	border: var(--lcx-hairline) solid color-mix(in srgb, var(--lcx-gold) 55%, transparent);
+	background-color: color-mix(in srgb, var(--lcx-gold) 14%, var(--lcx-bg-2));
+	color: var(--lcx-text);
+	cursor: pointer;
+	transition: background-color var(--lcx-dur-fast) ease;
+}
+
+.lc-view-root .lc-vision-nudge-chip:hover {
+	background-color: color-mix(in srgb, var(--lcx-gold) 26%, var(--lcx-bg-2));
+}
+
+/* ---- Momentum (pride/progress register, gold like Habit Tracker's own
+   streak treatment — same "proof of what's already working" idea) ---- */
+
+.lc-view-root .lc-momentum-card {
+	border-left: 3px solid var(--lcx-gold);
+	background:
+		linear-gradient(135deg, color-mix(in srgb, var(--lcx-gold) 10%, transparent), transparent 60%),
+		var(--lcx-card);
+}
+
+.lc-view-root .lc-momentum-line {
+	font-size: 0.88em;
+	color: var(--lcx-text);
+	padding: 2px 0;
+}
+
+/* ---- Goals tab ----
+   Everything here is scoped to .lc-outcomes-root (the wrapper renderOutcomes
+   applies), NOT .lc-view-root — several of these classes (icon buttons, the
+   add button, collapsible toggles, habit-row/dot/name/streak, the shared
+   .lc-quarter-section wrapper) are also used by the still-unrestyled
+   Quarter tab and by modals/the digest, none of which are part of this
+   pass. Scoping broadly would repeat the exact illegibility bug already
+   found and fixed once on Overview. */
+
+.lc-outcomes-root .lc-add-btn {
+	display: block;
+	margin-bottom: var(--lcx-card-gap);
+	padding: 8px 16px;
+	border: 1.5px dashed color-mix(in srgb, var(--lcx-glow-violet) 40%, transparent);
+	border-radius: var(--lcx-radius-lg-x);
+	background: transparent;
+	color: var(--lcx-text-muted);
+	cursor: pointer;
+	font-family: var(--lcx-font-display);
+	font-weight: 600;
+	box-shadow: none;
+	transition: border-color var(--lcx-dur-fast) ease, color var(--lcx-dur-fast) ease, background-color var(--lcx-dur-fast) ease;
+}
+
+.lc-outcomes-root .lc-add-btn:hover {
+	border-color: var(--lcx-glow-violet);
+	color: var(--lcx-glow-violet-bright);
+	background-color: color-mix(in srgb, var(--lcx-glow-violet) 10%, transparent);
+}
+
+.lc-outcomes-root .lc-outcomes-empty {
+	color: var(--lcx-text-faint);
+	font-style: italic;
+	text-align: center;
+	padding: 1.5em 0;
+}
+
+.lc-outcomes-root .lc-outcome-card {
+	position: relative;
+	padding: var(--lcx-card-pad);
+	border-radius: var(--lcx-radius-lg-x);
+	background-color: var(--lcx-card);
+	/* --lc-outcome-color is set per-card from the Goal's own Vision
+	   category (categoryColor() in main.ts) — kept as the identity accent,
+	   same way Habit Tracker uses --habit-color per habit, rather than
+	   flattening every card to one fixed violet. */
+	border: var(--lcx-hairline) solid color-mix(in srgb, var(--lc-outcome-color, var(--lcx-glow-violet)) var(--lcx-border-pct), transparent);
+	border-left: 3px solid var(--lc-outcome-color, var(--lcx-glow-violet));
+	box-shadow:
+		inset 0 1px 0 color-mix(in srgb, var(--lcx-glow-violet-bright) 16%, transparent),
+		0 4px 14px rgba(0, 0, 0, calc(var(--lcx-shadow-a) / 100 * 0.5));
+	transition: border-color var(--lcx-dur-fast) ease, box-shadow var(--lcx-dur-fast) ease;
+	color: var(--lcx-text);
+}
+
+.lc-outcomes-root .lc-outcome-card:hover {
+	box-shadow:
+		inset 0 1px 0 color-mix(in srgb, var(--lcx-glow-violet-bright) 24%, transparent),
+		0 0 calc(20px * var(--lcx-glow-pct) / 100) color-mix(in srgb, var(--lc-outcome-color, var(--lcx-glow-violet)) calc(var(--lcx-glow-a) * 0.6%), transparent),
+		0 6px 18px rgba(0, 0, 0, calc(var(--lcx-shadow-a) / 100 * 0.6));
+}
+
+.lc-outcomes-root .lc-outcome-header {
+	padding-right: 96px;
+}
+
+.lc-outcomes-root .lc-outcome-title {
+	font-family: var(--lcx-font-display);
+	font-weight: 700;
+	font-size: 1.05em;
+	color: var(--lcx-text);
+}
+
+.lc-outcomes-root .lc-outcome-status {
+	font-family: var(--lcx-font-display);
+	font-size: 0.65em;
+	font-weight: 700;
+	letter-spacing: var(--lcx-tracking);
+	text-transform: uppercase;
+	padding: 2px 6px;
+	border-radius: var(--lcx-radius-md-x);
+	background-color: color-mix(in srgb, var(--lcx-text) 12%, transparent);
+	color: var(--lcx-text-muted);
+}
+
+.lc-outcomes-root .lc-outcome-status-active {
+	background-color: color-mix(in srgb, var(--lcx-glow-violet) 30%, transparent);
+	color: var(--lcx-glow-violet-bright);
+}
+
+.lc-outcomes-root .lc-outcome-status-done {
+	background-color: color-mix(in srgb, var(--lcx-green) 30%, transparent);
+	color: var(--lcx-green-bright);
+}
+
+.lc-outcomes-root .lc-outcome-status-missed {
+	background-color: color-mix(in srgb, var(--lcx-red) 30%, transparent);
+	color: var(--lcx-red);
+}
+
+.lc-outcomes-root .lc-outcome-category {
+	font-size: 0.72em;
+	text-transform: uppercase;
+	letter-spacing: var(--lcx-tracking);
+	color: var(--lcx-text-faint);
+	margin-bottom: 6px;
+}
+
+.lc-outcomes-root .lc-outcome-current-quarter-badge {
+	display: inline-block;
+	font-size: 0.72em;
+	font-weight: 600;
+	color: var(--lcx-glow-violet-bright);
+	background-color: color-mix(in srgb, var(--lcx-glow-violet) 18%, transparent);
+	border-radius: var(--lcx-radius-md-x);
+	padding: 2px 8px;
+	margin-bottom: 6px;
+}
+
+.lc-outcomes-root .lc-outcome-metric,
+.lc-outcomes-root .lc-outcome-start-date,
+.lc-outcomes-root .lc-outcome-deadline {
+	font-size: 0.85em;
+	color: var(--lcx-text-muted);
+	margin-bottom: 4px;
+}
+
+.lc-outcomes-root .lc-outcome-why {
+	font-size: 0.88em;
+	font-style: italic;
+	color: var(--lcx-text);
+	margin-top: 4px;
+	line-height: 1.4;
+}
+
+.lc-outcomes-root .lc-outcome-obstacles {
+	font-size: 0.85em;
+	color: var(--lcx-text-muted);
+	margin-top: 4px;
+}
+
+.lc-outcomes-root .lc-progress-track {
+	flex-grow: 1;
+	height: 6px;
+	border-radius: 999px;
+	background-color: color-mix(in srgb, var(--lcx-glow-violet) 15%, var(--lcx-bg-2));
+	overflow: hidden;
+}
+
+.lc-outcomes-root .lc-progress-bar {
+	height: 100%;
+	border-radius: 999px;
+	background-color: var(--lc-outcome-color, var(--lcx-glow-violet));
+	transition: width var(--lcx-dur-mid) ease;
+}
+
+.lc-outcomes-root .lc-progress-bar-near-complete {
+	background: linear-gradient(90deg, var(--lc-outcome-color, var(--lcx-glow-violet)), var(--lcx-gold));
+}
+
+.lc-outcomes-root .lc-progress-label {
+	font-size: 0.72em;
+	color: var(--lcx-text-muted);
+	flex-shrink: 0;
+	width: 32px;
+	text-align: right;
+}
+
+.lc-outcomes-root .lc-outcome-system {
+	margin-top: 6px;
+	padding-top: 8px;
+	border-top: var(--lcx-hairline) solid color-mix(in srgb, var(--lcx-glow-violet) 20%, transparent);
+}
+
+.lc-outcomes-root .lc-outcome-system-label {
+	font-family: var(--lcx-font-display);
+	font-size: 0.7em;
+	font-weight: 700;
+	text-transform: uppercase;
+	letter-spacing: var(--lcx-tracking);
+	color: var(--lcx-text-faint);
+	margin-bottom: 4px;
+}
+
+.lc-outcomes-root .lc-outcome-system-empty {
+	margin-top: 6px;
+	padding-top: 8px;
+	border-top: var(--lcx-hairline) solid color-mix(in srgb, var(--lcx-glow-violet) 20%, transparent);
+	font-size: 0.78em;
+	color: var(--lcx-text-faint);
+	font-style: italic;
+}
+
+.lc-outcomes-root .lc-outcome-habit-row {
+	color: var(--lcx-text-muted);
+}
+
+.lc-outcomes-root .lc-outcome-habit-name {
+	color: var(--lcx-text);
+}
+
+.lc-outcomes-root .lc-outcome-habit-streak {
+	color: var(--lcx-gold-bright);
+}
+
+.lc-outcomes-root .lc-outcome-habit-task-badge {
+	color: var(--lcx-text-faint);
+	border: var(--lcx-hairline) solid color-mix(in srgb, var(--lcx-glow-violet) 30%, transparent);
+}
+
+.lc-outcomes-root .lc-icon-btn {
+	color: var(--lcx-text-muted);
+}
+
+.lc-outcomes-root .lc-icon-btn:hover {
+	opacity: 1;
+	background-color: color-mix(in srgb, var(--lcx-glow-violet) 18%, transparent);
+	color: var(--lcx-text);
+}
+
+.lc-outcomes-root .lc-quarter-section h4,
+.lc-outcomes-root .lc-collapsible-toggle {
+	color: var(--lcx-text-muted);
+	font-family: var(--lcx-font-display);
+}
+
+.lc-outcomes-root .lc-collapsible-toggle:hover {
+	color: var(--lcx-text);
+}
+
+/* ---- Add/Edit Goal modal ----
+   Obsidian modals render into their own overlay, outside .lc-view-root
+   entirely — no inheritance risk the way the pane had, but also no access
+   to .lc-view-root's tokens, so this re-declares its own copy, same
+   pattern as Habit Tracker's own .habit-tracker-modal. Native Setting-API
+   rows (labels, inputs, dropdowns, the slider) get themed too, not just
+   the custom bits — same precedent. Fixed to the shipped palette values
+   (not wired to the live Design Tweaks panel), also matching Habit
+   Tracker: a modal's tokens aren't meant to be tuned separately from the
+   main view's. */
+
+.lc-outcome-modal {
+	--lcx-bg: #0a0713;
+	--lcx-bg-2: #120a24;
+	--lcx-glow-violet: #a855f7;
+	--lcx-glow-violet-bright: #c084fc;
+	--lcx-card: #1a1030;
+	--lcx-card-border: color-mix(in srgb, var(--lcx-glow-violet) 30%, transparent);
+	--lcx-text: #f3ecff;
+	--lcx-text-muted: #b7a9d9;
+	--lcx-text-faint: #8574ad;
+	/* Explicit background, not left to Obsidian's own (theme-adaptive,
+	   possibly light) modal chrome — near-white --lcx-text only reads
+	   against a background this rule actually guarantees is dark. */
+	background-color: var(--lcx-bg) !important;
+	border-radius: 10px;
+	color: var(--lcx-text);
+}
+
+.lc-outcome-modal .setting-item,
+.lc-outcome-modal .lc-modal-footer {
+	border-top-color: var(--lcx-card-border);
+}
+
+.lc-outcome-modal h3 {
+	font-family: "Bahnschrift", "Avenir Next Condensed", "Futura", "Segoe UI", system-ui, sans-serif;
+	color: var(--lcx-text);
+	margin-top: 0;
+}
+
+.lc-outcome-modal p,
+.lc-outcome-modal label {
+	color: var(--lcx-text-muted);
+}
+
+.lc-outcome-modal .lc-field-label {
+	color: var(--lcx-text-faint);
+}
+
+.lc-outcome-modal input,
+.lc-outcome-modal textarea,
+.lc-outcome-modal select {
+	background-color: var(--lcx-bg-2) !important;
+	border-color: var(--lcx-card-border) !important;
+	color: var(--lcx-text) !important;
+}
+
+.lc-outcome-modal input:focus,
+.lc-outcome-modal textarea:focus,
+.lc-outcome-modal select:focus {
+	border-color: var(--lcx-glow-violet-bright) !important;
+	box-shadow: 0 0 0 2px color-mix(in srgb, var(--lcx-glow-violet) 35%, transparent) !important;
+}
+
+.lc-outcome-modal .setting-item-name {
+	color: var(--lcx-text);
+}
+
+.lc-outcome-modal .setting-item-description {
+	color: var(--lcx-text-faint);
+}
+
+.lc-outcome-modal .setting-item {
+	border-top-color: var(--lcx-card-border);
+}
+
+.lc-outcome-modal .lc-habit-picker {
+	border-color: var(--lcx-card-border);
+	background-color: var(--lcx-bg-2);
+}
+
+.lc-outcome-modal .lc-outcome-habit-task-badge {
+	color: var(--lcx-text-faint);
+	border-color: var(--lcx-card-border);
+}
+
+.lc-outcome-modal .mod-cta {
+	background-color: var(--lcx-glow-violet) !important;
+	color: #f9f5ff !important;
+}
+
+.lc-outcome-modal .mod-cta:hover {
+	background-color: var(--lcx-glow-violet-bright) !important;
+}
+
+
+
+/* Motion knob at zero means "no animation at all", which a duration alone
+   can't express (a 0s animation still fires its end state instantly, but
+   an infinite loop would still spin) — matches Habit Tracker's own
+   mechanism exactly, including the two selectors for how different
+   browsers serialize the inline style's spacing. */
+.lc-view-root[style*="--lcx-motion-pct: 0%"] *,
+.lc-view-root[style*="--lcx-motion-pct:0%"] * {
+	animation: none !important;
+	transition: none !important;
+}
+
+@media (prefers-reduced-motion: reduce) {
+	.lc-view-root * {
+		animation: none !important;
+		transition: none !important;
+	}
+}
+
+/* ---- View shell ---- */
 
 .lc-tab-row {
 	display: flex;
 	flex-wrap: wrap;
 	gap: 6px;
 	margin-bottom: var(--lc-space-4);
-	border-bottom: 1px solid var(--background-modifier-border);
+	border-bottom: var(--lcx-hairline) solid color-mix(in srgb, var(--lcx-glow-violet) 25%, transparent);
 	padding-bottom: var(--lc-space-3);
 }
 
 .lc-tab-btn {
+	font-family: var(--lcx-font-display);
 	font-size: 0.9em;
 	font-weight: 600;
+	letter-spacing: var(--lcx-tracking);
 	padding: 6px 14px;
 	cursor: pointer;
 	background: transparent;
-	border: none;
-	border-radius: var(--lc-radius-md);
-	color: var(--text-muted);
+	border: var(--lcx-hairline) solid transparent;
+	border-radius: var(--lcx-radius-md-x);
+	color: var(--lcx-text-muted);
 	box-shadow: none;
-	transition: background-color 0.12s ease, color 0.12s ease;
+	transition: background-color var(--lcx-dur-fast) ease, color var(--lcx-dur-fast) ease, border-color var(--lcx-dur-fast) ease;
 }
 
 .lc-tab-btn:hover {
-	background-color: var(--background-modifier-hover);
-	color: var(--text-normal);
+	background-color: color-mix(in srgb, var(--lcx-glow-violet) 14%, transparent);
+	border-color: color-mix(in srgb, var(--lcx-glow-violet) 30%, transparent);
+	color: var(--lcx-text);
 }
 
 .lc-tab-btn-active,
 .lc-tab-btn-active:hover {
-	background-color: var(--interactive-accent);
-	color: var(--text-on-accent);
+	background-color: color-mix(in srgb, var(--lcx-glow-violet) 65%, var(--lcx-bg-2));
+	border-color: var(--lcx-glow-violet);
+	color: var(--lcx-text);
+	box-shadow: 0 0 calc(12px * var(--lcx-glow-pct) / 100) color-mix(in srgb, var(--lcx-glow-violet) calc(var(--lcx-glow-a) * 1%), transparent);
 }
 
 .lc-walkthrough-btn {
@@ -1119,3 +1712,327 @@ body.theme-dark {
 		align-items: stretch;
 	}
 }
+
+/* ---- Design Tweaks panel (ported from Habit Tracker's habit-tweak-* block) ---- */
+.lc-tweak-panel {
+	position: fixed;
+	top: 64px;
+	right: 24px;
+	z-index: 300;
+	width: 340px;
+	max-height: calc(100vh - 120px);
+	display: flex;
+	flex-direction: column;
+	border-radius: 14px;
+	background: #14101c;
+	border: 1px solid #3b3550;
+	box-shadow: 0 18px 50px rgba(0, 0, 0, 0.6);
+	color: #ece8f5;
+	font-size: 13px;
+	font-family: system-ui, -apple-system, "Segoe UI", sans-serif;
+	overflow: hidden;
+}
+
+.lc-tweak-header {
+	display: flex;
+	align-items: center;
+	justify-content: space-between;
+	gap: 8px;
+	padding: 10px 12px;
+	background: #1b1626;
+	border-bottom: 1px solid #322c45;
+	cursor: grab;
+	user-select: none;
+}
+
+.lc-tweak-header:active {
+	cursor: grabbing;
+}
+
+.lc-tweak-title {
+	font-weight: 700;
+	letter-spacing: 0.01em;
+}
+
+.lc-tweak-count {
+	font-size: 11px;
+	color: #8b83a3;
+	margin-top: 1px;
+}
+
+.lc-tweak-count-dirty {
+	color: #c9a6ff;
+}
+
+.lc-tweak-close {
+	background: transparent !important;
+	border: none !important;
+	box-shadow: none !important;
+	color: #8b83a3 !important;
+	cursor: pointer;
+	font-size: 14px;
+	padding: 2px 6px;
+	line-height: 1;
+}
+
+.lc-tweak-close:hover {
+	color: #fff !important;
+}
+
+.lc-tweak-body {
+	overflow-y: auto;
+	padding: 4px 0 8px;
+	flex: 1;
+}
+
+.lc-tweak-section-head {
+	display: flex;
+	align-items: center;
+	gap: 6px;
+	padding: 9px 12px;
+	font-weight: 600;
+	font-size: 11px;
+	text-transform: uppercase;
+	letter-spacing: 0.07em;
+	color: #a99fc4;
+	cursor: pointer;
+	user-select: none;
+	border-top: 1px solid #262032;
+}
+
+.lc-tweak-section-head:hover {
+	color: #fff;
+	background: #1b1626;
+}
+
+.lc-tweak-section-head:focus-visible {
+	outline: 2px solid #8b5cf6;
+	outline-offset: -2px;
+}
+
+.lc-tweak-caret {
+	font-size: 9px;
+	width: 10px;
+}
+
+.lc-tweak-hidden {
+	display: none;
+}
+
+.lc-tweak-row {
+	display: flex;
+	align-items: center;
+	justify-content: space-between;
+	gap: 10px;
+	padding: 5px 12px;
+}
+
+.lc-tweak-row:hover {
+	background: #1a1524;
+}
+
+.lc-tweak-label-wrap {
+	min-width: 0;
+	flex: 1;
+}
+
+.lc-tweak-label {
+	font-size: 12px;
+	color: #d9d3e8;
+	white-space: nowrap;
+	overflow: hidden;
+	text-overflow: ellipsis;
+}
+
+.lc-tweak-value {
+	font-size: 10px;
+	color: #7d7595;
+	font-variant-numeric: tabular-nums;
+}
+
+.lc-tweak-control {
+	display: flex;
+	align-items: center;
+	gap: 6px;
+	flex-shrink: 0;
+}
+
+.lc-tweak-range {
+	width: 118px;
+	accent-color: #8b5cf6;
+	cursor: pointer;
+}
+
+.lc-tweak-color {
+	width: 26px;
+	height: 24px;
+	padding: 0;
+	border: 1px solid #3b3550;
+	border-radius: 5px;
+	background: transparent;
+	cursor: pointer;
+}
+
+.lc-tweak-hex {
+	width: 76px;
+	padding: 3px 6px !important;
+	font-size: 11px !important;
+	font-family: ui-monospace, Menlo, Consolas, monospace !important;
+	background: #0f0c16 !important;
+	border: 1px solid #3b3550 !important;
+	border-radius: 5px !important;
+	color: #ece8f5 !important;
+}
+
+.lc-tweak-select {
+	max-width: 152px;
+	padding: 3px 6px !important;
+	font-size: 11px !important;
+	background: #0f0c16 !important;
+	border: 1px solid #3b3550 !important;
+	border-radius: 5px !important;
+	color: #ece8f5 !important;
+}
+
+.lc-tweak-toggle {
+	min-width: 46px;
+	padding: 3px 10px !important;
+	font-size: 11px !important;
+	font-weight: 600 !important;
+	background: #0f0c16 !important;
+	border: 1px solid #3b3550 !important;
+	border-radius: 999px !important;
+	box-shadow: none !important;
+	color: #7d7595 !important;
+	cursor: pointer;
+}
+
+.lc-tweak-toggle-on {
+	background: #8b5cf6 !important;
+	border-color: #8b5cf6 !important;
+	color: #fff !important;
+}
+
+.lc-tweak-footer {
+	display: flex;
+	gap: 6px;
+	padding: 10px 12px;
+	background: #1b1626;
+	border-top: 1px solid #322c45;
+}
+
+.lc-tweak-btn {
+	flex: 1;
+	padding: 6px 8px !important;
+	font-size: 12px !important;
+	font-weight: 600 !important;
+	border-radius: 7px !important;
+	cursor: pointer;
+	background: #262032 !important;
+	border: 1px solid #3b3550 !important;
+	box-shadow: none !important;
+	color: #d9d3e8 !important;
+}
+
+.lc-tweak-btn:hover {
+	background: #322c45 !important;
+	color: #fff !important;
+}
+
+.lc-tweak-btn-cta {
+	background: #8b5cf6 !important;
+	border-color: #8b5cf6 !important;
+	color: #fff !important;
+}
+
+.lc-tweak-btn-cta:hover {
+	background: #9d6ffb !important;
+}
+
+.lc-tweak-btn-warn:hover {
+	background: #4a2230 !important;
+	border-color: #7d3b4d !important;
+	color: #ffd7de !important;
+}
+
+/* Narrow panes / mobile: the panel becomes a bottom sheet rather than a
+   floating card, since a 340px overlay would cover a phone screen. */
+@media (max-width: 620px) {
+	.lc-tweak-panel {
+		top: auto;
+		right: 8px;
+		left: 8px;
+		bottom: 8px;
+		width: auto;
+		max-height: 62vh;
+	}
+}
+
+/* ---- Design Tweaks: copy fields ----
+   Copy rows stack (label above field) rather than sitting side-by-side
+   like the token controls, because the values are sentences, not numbers —
+   a 118px control would be unusable for a walkthrough paragraph. */
+.lc-tweak-row-copy {
+	display: block;
+	padding: 7px 12px 9px;
+}
+
+.lc-tweak-copy-labelrow {
+	display: flex;
+	align-items: baseline;
+	justify-content: space-between;
+	gap: 8px;
+	margin-bottom: 4px;
+}
+
+/* Placeholder hints, shown inline so they can't be missed — deleting one
+   silently breaks the string's interpolation. */
+.lc-tweak-vars {
+	flex-shrink: 0;
+	font-family: ui-monospace, Menlo, Consolas, monospace;
+	font-size: 10px;
+	color: #7c6bb0;
+	background: #191327;
+	padding: 1px 5px;
+	border-radius: 4px;
+}
+
+.lc-tweak-text,
+.lc-tweak-textarea {
+	width: 100%;
+	box-sizing: border-box;
+	padding: 5px 7px !important;
+	font-size: 12px !important;
+	font-family: inherit !important;
+	line-height: 1.45;
+	background: #0f0c16 !important;
+	border: 1px solid #3b3550 !important;
+	border-radius: 6px !important;
+	color: #ece8f5 !important;
+	resize: vertical;
+}
+
+.lc-tweak-text:focus,
+.lc-tweak-textarea:focus {
+	border-color: #8b5cf6 !important;
+	box-shadow: 0 0 0 2px rgba(139, 92, 246, 0.25) !important;
+}
+
+/* ---- Day view ----
+   One full-width check bar per habit rather than a grid of one. A lone
+   square would leave most of the card empty and read as a cropped Week
+   view; a bar reads as a checklist row and gives a large tap target, which
+   is the point of a today-only view on a phone.
+
+   The bar reuses .habit-tracker-week-cell so it inherits every state class
+   already defined for boxed cells (-done / -missed / -future / -min,
+   at-risk pulse, today ring). Everything below only overrides shape. */
+.habit-tracker-day-grid {
+	display: flex;
+	padding: 2px 0;
+}
+
+.habit-tracker-week-cell.habit-tracker-day-cell {
+	flex: 1;
+	/* Cancels the square aspect + max-width that Week/Month cells rely on. */
+	aspect-ratio: auto;
